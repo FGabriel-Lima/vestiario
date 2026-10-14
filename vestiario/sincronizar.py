@@ -36,7 +36,8 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pas
         raise FileNotFoundError(f"Pasta de saves não encontrada: {pasta_saves} (ajuste VESTIARIO_SAVES)")
     avisos = []
     try:
-        banco.gravar_nomes(con, patch.carregar_nomes(pasta_pes))
+        raw = patch.carregar_player_bin(pasta_pes)
+        banco.gravar_nomes(con, patch.ler_nomes(raw), patch.ler_posicoes(raw))
     except Exception as e:  # fronteira de confiança: nomes são opcionais
         avisos.append(f"Nomes dos jogadores indisponíveis ({e}). Ajuste VESTIARIO_PES.")
 

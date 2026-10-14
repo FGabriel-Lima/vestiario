@@ -167,3 +167,7 @@ def test_save_real_contratos(save_atual):
     assert (rafael.salario_anual // 52 * MOEDA, rafael.multa * MOEDA, rafael.fim) == (148_350, 25_996_940, date(2027, 1, 31))
     assert save_atual.contratos[160150].fim == date(2030, 1, 31)                         # Cauly
     assert len(save_atual.contratos) >= len(save_atual.elenco) - 3
+
+
+def test_save_real_orcamento(save_atual):
+    assert save_atual.orcamento * MOEDA == 443_590_580  # "Orçam. transf." na tela do PES em 31/01/2026

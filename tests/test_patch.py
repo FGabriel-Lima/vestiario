@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from vestiario.patch import (REG, ROSTO, UNICOLOR, WESYS, carregar_nomes, dds_para_png, desembrulhar, ler_arquivos,
-                              ler_cores)
+from vestiario.patch import (REG, ROSTO, UNICOLOR, WESYS, carregar_player_bin, dds_para_png, desembrulhar,
+                              ler_arquivos, ler_cores, ler_nomes, ler_posicoes)
 
 
 def player_bin(jogadores: dict[int, str]) -> bytes:
@@ -32,19 +32,22 @@ def test_sider_primeira_pasta_vence(tmp_path):
         '\tcpk.root = ".\\livecpk\\vazia"\n'
         '\tcpk.root = ".\\livecpk\\root"\n'
         '\tcpk.root = ".\\livecpk\\outra"\n', encoding="utf8")
-    assert carregar_nomes(tmp_path) == {7: "Do Root"}
+    assert ler_nomes(carregar_player_bin(tmp_path)) == {7: "Do Root"}
 
 
 def test_sem_player_bin(tmp_path):
     with pytest.raises(FileNotFoundError):
-        carregar_nomes(tmp_path)
+        carregar_player_bin(tmp_path)
 
 
 def test_patch_instalado():
     pes = Path(r"D:\Transferpatch")
     if not pes.exists():
         pytest.skip(r"Transfer Patch não instalado em D:\Transferpatch")
-    assert carregar_nomes(pes)[60657] == "Jonathan Calleri"
+    raw = carregar_player_bin(pes)
+    assert ler_nomes(raw)[60657] == "Jonathan Calleri"
+    # posições da tela do PES: Calleri CA, Rafael GO, Hezze VOL, Cauly MAT
+    assert {p: ler_posicoes(raw)[p] for p in (60657, 41204, 135214, 160150)} == {60657: 12, 41204: 0, 135214: 4, 160150: 8}
 
 
 def test_player_bin_corrompido_vira_valueerror(tmp_path):
@@ -53,7 +56,7 @@ def test_player_bin_corrompido_vira_valueerror(tmp_path):
     (alvo / "Player.bin").write_bytes(WESYS + struct.pack("<II", 4, 312) + b"lixo")
     (tmp_path / "SiderAddons" / "sider.ini").write_text(r'cpk.root = ".\livecpk\root"' + "\n", encoding="utf8")
     with pytest.raises(ValueError, match="corrompido"):
-        carregar_nomes(tmp_path)
+        carregar_player_bin(tmp_path)
 
 
 def test_ler_arquivos_do_sider_ignora_os_que_nao_existem(tmp_path):
@@ -98,3 +101,11 @@ def test_minifaces_instaladas_viram_png():
     alvo = ROSTO.format(100057)  # DXT5 de 256 px
     png = dds_para_png(ler_arquivos(pes, {alvo})[alvo])
     assert png[:4] == b"\x89PNG" and Image.open(io.BytesIO(png)).size == (128, 128)
+
+
+def test_posicao_no_player_bin():
+    reg = bytearray(REG)
+    struct.pack_into("<I", reg, 8, 7)
+    reg[54] = 0b1100_0000 | 0b0010  # bits 434..437 (byte 54, bits 2..5) = 12 (CA); o resto do byte é de outro campo
+    reg[54] = (reg[54] & ~(0b1111 << 2)) | (12 << 2)
+    assert ler_posicoes(bytes(reg)) == {7: 12}
