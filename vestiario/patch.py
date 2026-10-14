@@ -14,7 +14,10 @@ REG, OFF_ID, OFF_NOME = 312, 8, 68
 def desembrulhar(blob: bytes) -> bytes:
     if blob[:8] != WESYS:
         raise ValueError("Player.bin sem cabeçalho WESYS")
-    return zlib.decompress(blob[16:])
+    try:
+        return zlib.decompress(blob[16:])
+    except zlib.error as e:
+        raise ValueError(f"Player.bin corrompido: {e}") from e
 
 
 def ler_nomes(raw: bytes) -> dict[int, str]:

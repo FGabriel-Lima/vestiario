@@ -42,3 +42,12 @@ def test_patch_instalado():
     if not pes.exists():
         pytest.skip("SP Football Life 2026 não instalado")
     assert carregar_nomes(pes)[60657] == "Jonathan Calleri"
+
+
+def test_player_bin_corrompido_vira_valueerror(tmp_path):
+    alvo = tmp_path / "SiderAddons" / "livecpk" / "root" / "common/etc/pesdb"
+    alvo.mkdir(parents=True)
+    (alvo / "Player.bin").write_bytes(WESYS + struct.pack("<II", 4, 312) + b"lixo")
+    (tmp_path / "SiderAddons" / "sider.ini").write_text(r'cpk.root = ".\livecpk\root"' + "\n", encoding="utf8")
+    with pytest.raises(ValueError, match="corrompido"):
+        carregar_nomes(tmp_path)
