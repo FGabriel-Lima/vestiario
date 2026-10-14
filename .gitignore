@@ -17,3 +17,7 @@ node_modules/
 # Documentação de planejamento: fica só local
 docs/
 CLAUDE.md
+.venv/
+web/dist/
+*.db
+*.egg-info/

@@ -1,4 +1,4 @@
-"""Minimal CRI CPK reader (TOC only, no CRILAYLA). Usage: cpk.py <file.cpk> [substring-to-extract outdir]"""
+"""Minimal CRI CPK reader (TOC only, no CRILAYLA). Usage: python -m vestiario.cpk <file.cpk> [substring-to-extract outdir]"""
 import struct, sys, os
 
 def utf_table(buf):

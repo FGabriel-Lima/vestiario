@@ -1,4 +1,4 @@
-"""Port of pesXdecrypter (public domain) for PES 2021 saves. Usage: pesdecrypt.py <in> <outdir>"""
+"""Port of pesXdecrypter (public domain) for PES 2021 saves. Usage: python -m vestiario.pesdecrypt <in> <outdir>"""
 import random, struct, sys, os
 
 KEY21 = bytes.fromhex(
