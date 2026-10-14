@@ -15,4 +15,6 @@ export const api = {
   lendas: (id) => pedir(`/carreiras/${id}/lendas`),
 };
 
-export const dataBR = (iso) => iso.split("-").reverse().join("/");
+export const dataBR = (iso) => iso.slice(0, 10).split("-").reverse().join("/");
+
+export const dataHoraBR = (iso) => `${dataBR(iso)} às ${iso.slice(11, 16)}`;

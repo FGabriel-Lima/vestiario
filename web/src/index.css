@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Paleta "gramado à noite" do fifa-career-mode-manager */
+/* Paleta "gramado à noite" do fifa-career-mode-manager + materiais do vestiário */
 @theme {
   --color-pitch-950: #0b1a10;
   --color-pitch-900: #112417;
@@ -10,12 +10,22 @@
   --color-muted: #9db5a3;
   --color-neon: #11d411;
   --color-gold: #e7c35a;
+  --color-cartao: #e0574a; /* cartão vermelho: derrotas e erros */
+  --color-fita: #e8dcb8; /* fita crepe */
+  --color-pincel: #1c2620; /* tinta do pincel atômico */
   --font-sans: "Lexend", system-ui, sans-serif;
   --font-kit: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-pincel: "Permanent Marker", "Comic Sans MS", cursive;
 }
 
 body {
   @apply bg-pitch-950 text-chalk font-sans antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-neon);
+  outline-offset: 3px;
 }
 
 .icone {
@@ -23,4 +33,73 @@ body {
   font-size: 1.25rem;
   line-height: 1;
   vertical-align: middle;
+}
+
+/* Assinatura: rótulo de fita crepe escrito a pincel atômico, como nos armários */
+.fita {
+  --giro: -1.5deg;
+  display: inline-block;
+  padding: 0.2em 0.9em 0.1em;
+  background:
+    linear-gradient(90deg, rgb(255 255 255 / 0.18), transparent 35%, rgb(0 0 0 / 0.06) 70%, transparent),
+    var(--color-fita);
+  color: var(--color-pincel);
+  font-family: var(--font-pincel);
+  line-height: 1.2;
+  transform: rotate(var(--giro));
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.45));
+  clip-path: polygon(2% 0, 98% 0, 100% 18%, 97% 36%, 100% 55%, 97.5% 76%, 100% 100%, 2% 100%, 0 82%, 3% 63%, 0 44%, 2.5% 24%);
+  animation: colar 280ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes colar {
+  from {
+    opacity: 0;
+    transform: rotate(-7deg) scale(1.12);
+  }
+}
+
+/* Porta do armário: frestas em cima, puxador do lado, abre um pouco no hover */
+.armario {
+  position: relative;
+  transform-origin: left center;
+  transition: transform 220ms ease, background-color 220ms ease;
+}
+.armario::before {
+  content: "";
+  display: block;
+  height: 1.75rem;
+  margin: 0 18% 1.25rem;
+  background: repeating-linear-gradient(to bottom, var(--color-pitch-950) 0 3px, transparent 3px 7px);
+  border-radius: 2px;
+  opacity: 0.8;
+}
+.armario::after {
+  content: "";
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  width: 0.35rem;
+  height: 2.75rem;
+  translate: 0 -50%;
+  border-radius: 999px;
+  background: var(--color-pitch-700);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+.armario:hover,
+.armario:focus-visible {
+  transform: perspective(900px) rotateY(-9deg);
+  background-color: var(--color-pitch-700);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fita {
+    animation: none;
+  }
+  .armario,
+  .armario:hover,
+  .armario:focus-visible {
+    transition: none;
+    transform: none;
+  }
 }

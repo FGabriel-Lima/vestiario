@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, dataBR } from "./api.js";
+import { api, dataBR, dataHoraBR } from "./api.js";
+import Escudo from "./Escudo.jsx";
 
 export default function Inicio({ onAbrir }) {
-  const [carreiras, setCarreiras] = useState([]);
+  const [carreiras, setCarreiras] = useState(null);
   const [sincronizando, setSincronizando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [erro, setErro] = useState(null);
@@ -27,36 +28,48 @@ export default function Inicio({ onAbrir }) {
 
   return (
     <>
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="font-kit text-5xl font-bold uppercase tracking-wide">Vestiário</h1>
+      <header className="mb-10 flex flex-wrap items-end justify-between gap-6">
+        <div>
+          <h1 className="font-kit text-6xl font-extrabold uppercase leading-none tracking-tight sm:text-7xl">
+            Vestiário
+          </h1>
+          <p className="mt-2 text-muted">Suas carreiras da Master League, direto do save do PES.</p>
+        </div>
         <button
           onClick={sincronizar}
           disabled={sincronizando}
-          className="flex items-center gap-2 rounded-lg bg-neon px-4 py-2 font-semibold text-pitch-950 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-md bg-neon px-5 py-3 font-kit text-xl font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110 disabled:opacity-60"
         >
-          <span className={`icone ${sincronizando ? "animate-spin" : ""}`}>sync</span>
-          {sincronizando ? "Sincronizando…" : "Sincronizar"}
+          <span className={`icone ${sincronizando ? "animate-spin motion-reduce:animate-none" : ""}`}>sync</span>
+          {sincronizando ? "Lendo os saves…" : "Sincronizar"}
         </button>
       </header>
 
-      {erro && <p className="mb-4 rounded-lg bg-red-900/60 p-3">{erro}</p>}
+      {erro && <p className="mb-6 rounded-md border-l-4 border-cartao bg-pitch-900 p-4">{erro}</p>}
       {resultado && <ResultadoSync resultado={resultado} />}
 
-      {carreiras.length === 0 ? (
-        <p className="text-muted">Nenhuma carreira ainda. Salve no PES e clique em Sincronizar.</p>
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {carreiras.map((c) => (
+      {carreiras?.length === 0 && (
+        <p className="max-w-md text-muted">
+          Nenhuma carreira ainda. Salve a Master League no PES e clique em <strong className="text-chalk">Sincronizar</strong>.
+        </p>
+      )}
+      {carreiras?.length > 0 && (
+        <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {carreiras.map((c, i) => (
             <li key={c.id}>
               <button
                 onClick={() => onAbrir(c.id)}
-                className="w-full rounded-xl bg-pitch-800 p-5 text-left hover:bg-pitch-700"
+                className="armario w-full rounded-md border border-pitch-700 bg-pitch-800 px-6 pb-6 text-left"
               >
-                <p className="font-kit text-3xl font-bold uppercase">{c.clube_nome}</p>
-                <p className="text-muted">
-                  {c.nome} · {c.slot} · no jogo: {dataBR(c.data_jogo)}
-                </p>
-                <p className="mt-2 text-xs text-muted">Sincronizado em {c.em.replace("T", " ")}</p>
+                <Escudo id={c.escudo} nome={c.clube_nome} className="mb-4 block size-16 drop-shadow-lg" />
+                <span className="fita text-2xl" style={{ "--giro": `${i % 2 ? 1.5 : -2}deg` }}>
+                  {c.clube_nome}
+                </span>
+                <span className="mt-5 block font-kit text-lg font-semibold uppercase tracking-wide text-muted">
+                  {c.nome} · {c.slot}
+                </span>
+                <span className="mt-1 block">No jogo: {dataBR(c.data_jogo)}</span>
+                <span className="mt-4 block text-xs text-muted">Sincronizado em {dataHoraBR(c.em)}</span>
               </button>
             </li>
           ))}
@@ -68,19 +81,23 @@ export default function Inicio({ onAbrir }) {
 
 function ResultadoSync({ resultado }) {
   return (
-    <section className="mb-6 rounded-xl bg-pitch-900 p-4 text-sm">
-      {resultado.avisos.map((a) => (
-        <p key={a} className="text-gold">
+    <section aria-live="polite" className="mb-8 rounded-md bg-pitch-900 p-4 text-sm">
+      {resultado.avisos.map((a, i) => (
+        <p key={i} className="mb-2 text-gold">
           <span className="icone">warning</span> {a}
         </p>
       ))}
-      <ul>
+      <ul className="space-y-1">
         {resultado.arquivos.map((a) => (
-          <li key={a.arquivo}>
-            <span className="font-semibold">{a.arquivo}</span>{" "}
-            {a.status === "ok" && `${a.carreira} (${a.clube}): ${a.novas} partidas novas, ${a.atualizadas} atualizadas`}
+          <li key={a.arquivo} className="flex flex-wrap gap-x-2">
+            <span className="font-semibold">{a.arquivo}</span>
+            {a.status === "ok" && (
+              <span>
+                {a.carreira} ({a.clube}): {a.novas} partidas novas, {a.atualizadas} atualizadas
+              </span>
+            )}
             {a.status === "sem mudanças" && <span className="text-muted">sem mudanças</span>}
-            {a.status === "erro" && <span className="text-red-400">{a.mensagem}</span>}
+            {a.status === "erro" && <span className="text-cartao">{a.mensagem}</span>}
           </li>
         ))}
       </ul>
