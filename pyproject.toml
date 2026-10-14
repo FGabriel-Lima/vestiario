@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vestiario"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.140", "uvicorn>=0.54", "pillow>=11"]
+
+[project.optional-dependencies]
+dev = ["pytest>=9", "httpx2>=2.13"]
+
+[tool.setuptools]
+packages = ["vestiario"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
