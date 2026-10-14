@@ -107,3 +107,20 @@ def test_consultas(con):
     assert [(l["nome"], l["gols"]) for l in lendas["artilheiros"][:2]] == [("Artilheiro", 3), ("Garçom", 1)]
     assert lendas["garcons"][0]["nome"] == "Garçom"
     assert lendas["mais_jogos"][0]["jogos"] == 4
+
+
+def test_tabela_de_times_diferente_recusa_o_save(con):
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01"), AGORA)
+    outro = fazer_save("2026-04-01")
+    outro.times = ["Clube A", "Clube X", "Clube C"]
+    with pytest.raises(ValueError, match="índice 1"):
+        banco.gravar(con, "ML00000000", outro, AGORA)
+    assert contar(con, "SELECT count(*) FROM sincronizacao") == 1
+
+
+def test_elenco_de_temporada_passada_nao_inclui_contratados_depois(con):
+    banco.gravar_nomes(con, {10: "Veterano", 12: "Novato"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2025-06-01", 0, 1, (1, 0), [atuacao(10, 0, 1)])], elenco=(10, 12)), AGORA)
+    assert [l["nome"] for l in banco.elenco(con, 1, 2025)] == ["Veterano"]
+    assert {l["nome"] for l in banco.elenco(con, 1, 2026)} == {"Novato", "Veterano"}

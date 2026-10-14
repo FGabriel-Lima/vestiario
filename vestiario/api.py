@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import banco
 from .sincronizar import sincronizar
@@ -16,6 +17,7 @@ DB = Path(os.environ.get("VESTIARIO_DB", Path(os.environ.get("LOCALAPPDATA", _ca
 WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 app = FastAPI(title="Vestiário")
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])  # testserver = TestClient
 
 
 def _con():

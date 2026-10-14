@@ -62,8 +62,14 @@ def marcar_arquivo(con: sqlite3.Connection, caminho: str, tamanho: int, mtime: f
 def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict:
     """Grava um save numa transação. Partida disputada nunca regride; jogos futuros vêm só do save mais recente."""
     with con:
+        # ponytail: carreira = (slot, nome do save); uma ML nova no mesmo slot com o mesmo nome padrão se mistura com a antiga (a trava de times acima pega parte disso). Achar um id de carreira no header.dat se virar problema.
         cid = con.execute("INSERT INTO carreira(slot, nome) VALUES(?, ?) ON CONFLICT DO UPDATE "
                           "SET nome = excluded.nome RETURNING id", (slot, save.nome)).fetchone()[0]
+        guardados = {r[0]: r[1] for r in con.execute("SELECT idx, nome FROM time WHERE carreira_id = ?", (cid,))}
+        diferente = next((i for i, n in enumerate(save.times) if guardados.get(i, n) != n), None)
+        if diferente is not None:
+            raise ValueError(f"tabela de times mudou no índice {diferente}: "
+                             f"{guardados[diferente]!r} virou {save.times[diferente]!r}")
         ultima = con.execute("SELECT max(data_jogo) FROM sincronizacao WHERE carreira_id = ?", (cid,)).fetchone()[0]
         mais_recente = ultima is None or save.data_jogo.isoformat() >= ultima
         sid = con.execute(
@@ -181,7 +187,7 @@ def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
     atuais = {r[0]: r[1] for r in con.execute(
         "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) FROM elenco e "
         "LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.sincronizacao_id = ?", (s["id"],))}
-    for pid, nome in atuais.items():
+    for pid, nome in atuais.items() if ano == int(s["data_jogo"][:4]) else ():
         linhas.setdefault(pid, {"player_id": pid, "nome": nome, "jogos": 0, "gols": 0, "assistencias": 0})
     for pid, linha in linhas.items():
         linha["no_elenco"] = pid in atuais

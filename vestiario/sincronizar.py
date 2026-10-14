@@ -12,7 +12,7 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path) -> 
     avisos = []
     try:
         banco.gravar_nomes(con, patch.carregar_nomes(pasta_pes))
-    except (OSError, ValueError) as e:
+    except Exception as e:  # fronteira de confiança: nomes são opcionais
         avisos.append(f"Nomes dos jogadores indisponíveis ({e}). Ajuste VESTIARIO_PES.")
 
     arquivos = sorted([*pasta_saves.glob("backup/ML0*"), *pasta_saves.glob("ML0*")],
@@ -38,7 +38,7 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path) -> 
         try:
             gravado = banco.gravar(con, arq.name, save, datetime.now())
             banco.marcar_arquivo(con, str(arq), st.st_size, st.st_mtime)
-        except sqlite3.Error as e:
+        except (sqlite3.Error, ValueError) as e:
             r.update(status="erro", mensagem=f"Erro ao gravar no banco: {e}")
             continue
         r.update(gravado, status="ok", carreira=save.nome, clube=save.clube, data_jogo=save.data_jogo.isoformat())

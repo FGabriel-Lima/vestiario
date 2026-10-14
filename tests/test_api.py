@@ -73,3 +73,7 @@ def test_erro_ao_gravar_pula_so_aquele_arquivo(cliente, monkeypatch):
     status = {a["arquivo"]: (a["status"], a.get("mensagem", "")) for a in r.json()["arquivos"]}
     assert status["ML00000001"][0] == "ok"
     assert status["ML00000000"][0] == "erro" and "database is locked" in status["ML00000000"][1]
+
+
+def test_host_estranho_e_recusado(cliente):
+    assert cliente.get("/api/carreiras", headers={"host": "evil.example"}).status_code == 400
