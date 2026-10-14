@@ -35,7 +35,11 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path) -> 
         except Exception as e:  # fronteira de confiança: qualquer falha de leitura = arquivo pulado, nada gravado
             r.update(status="erro", mensagem=f"Formato não reconhecido: {e}")
             continue
-        r.update(banco.gravar(con, arq.name, save, datetime.now()), status="ok",
-                 carreira=save.nome, clube=save.clube, data_jogo=save.data_jogo.isoformat())
-        banco.marcar_arquivo(con, str(arq), st.st_size, st.st_mtime)
+        try:
+            gravado = banco.gravar(con, arq.name, save, datetime.now())
+            banco.marcar_arquivo(con, str(arq), st.st_size, st.st_mtime)
+        except sqlite3.Error as e:
+            r.update(status="erro", mensagem=f"Erro ao gravar no banco: {e}")
+            continue
+        r.update(gravado, status="ok", carreira=save.nome, clube=save.clube, data_jogo=save.data_jogo.isoformat())
     return {"avisos": avisos, "arquivos": resultados}

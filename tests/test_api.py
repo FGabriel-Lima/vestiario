@@ -1,11 +1,12 @@
 import shutil
+import sqlite3
 from datetime import datetime
 
 import pytest
 from conftest import SAVES, atuacao, fazer_save, partida
 from fastapi.testclient import TestClient
 
-from vestiario import api, banco
+from vestiario import api, banco, leitor
 
 
 @pytest.fixture
@@ -52,3 +53,23 @@ def test_sincronizar_save_real(cliente):
     r = cliente.post("/api/sincronizar").json()
     assert r["arquivos"][0]["status"] == "ok" and r["arquivos"][0]["novas"] > 0
     assert cliente.post("/api/sincronizar").json()["arquivos"][0]["status"] == "sem mudanças"
+
+
+def test_erro_ao_gravar_pula_so_aquele_arquivo(cliente, monkeypatch):
+    api.SAVES.mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"Liga Master 01")
+    (api.SAVES / "ML00000001").write_bytes(b"Liga Master 02")
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save(nome=raw.decode()))
+    original = banco.gravar
+
+    def gravar(con, slot, save, em):
+        if slot == "ML00000000":
+            raise sqlite3.OperationalError("database is locked")
+        return original(con, slot, save, em)
+
+    monkeypatch.setattr(banco, "gravar", gravar)
+    r = cliente.post("/api/sincronizar")
+    assert r.status_code == 200
+    status = {a["arquivo"]: (a["status"], a.get("mensagem", "")) for a in r.json()["arquivos"]}
+    assert status["ML00000001"][0] == "ok"
+    assert status["ML00000000"][0] == "erro" and "database is locked" in status["ML00000000"][1]
