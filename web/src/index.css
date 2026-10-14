@@ -13,6 +13,10 @@
   --color-cartao: #e0574a; /* cartão vermelho: derrotas e erros */
   --color-fita: #e8dcb8; /* fita crepe */
   --color-pincel: #1c2620; /* tinta do pincel atômico */
+  --color-pos-gol: #f2c94c; /* posições nas cores de setor do PES */
+  --color-pos-def: #5bb8f5;
+  --color-pos-meio: #6fd36f;
+  --color-pos-ata: #ff6b7a;
   --color-papel: #f6f0de; /* folha da súmula, mais clara que a fita para a fita aparecer por cima */
   /* Cores do clube da carreira aberta (Carreira.jsx troca estas quatro); sem cores, fica o padrão do vestiário */
   --color-destaque: var(--color-neon); /* cor do clube com contraste garantido sobre o gramado */

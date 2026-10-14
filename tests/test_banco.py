@@ -263,3 +263,25 @@ def test_contratos_no_elenco_e_fim_de_contrato_nas_transferencias(con):
     assert titular["contrato"] == {"salario_semanal": 345 * MOEDA, "multa": 60458 * MOEDA, "fim": "2027-01-31"}
     sairam = {p["nome"]: p["fim_de_contrato"] for p in banco.transferencias(con, 1)["janelas"][0]["sairam"]}
     assert sairam == {"Vencido": True, "Vendido": False}
+
+
+def test_posicao_e_orcamento(con):
+    banco.gravar_nomes(con, {10: "Goleiro", 11: "Atacante"}, {10: 0, 11: 12})
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 11), orcamento=1031606), AGORA)
+    assert {l["nome"]: l["posicao"] for l in banco.elenco(con, 1, 2026)} == {"Goleiro": 0, "Atacante": 12}
+    assert banco.carreira(con, 1)["orcamento"] == 1031606 * MOEDA
+    banco.gravar_nomes(con, {10: "Goleiro"})  # sem posições (patch antigo): a posição gravada fica
+    assert banco.elenco(con, 1, 2026)[0]["posicao"] in (0, 12)
+
+
+def test_banco_sem_orcamento_ganha_as_colunas_e_rele_os_saves(tmp_path):
+    caminho = tmp_path / "v.db"
+    banco.conectar(caminho).close()
+    antigo = sqlite3.connect(caminho)
+    antigo.executescript("ALTER TABLE sincronizacao DROP COLUMN orcamento; ALTER TABLE jogador DROP COLUMN posicao;"
+                         "INSERT INTO arquivo VALUES('x/ML00000000', 1, 1.0);")
+    antigo.close()
+    con = banco.conectar(caminho)
+    assert contar(con, "SELECT count(*) FROM arquivo") == 0
+    assert "posicao" in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}
+    con.close()

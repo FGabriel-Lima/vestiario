@@ -123,7 +123,9 @@ export default function Carreira({ id, onVoltar }) {
           <p className="text-muted">Nenhuma partida do clube registrada ainda. Jogue uma partida, salve e sincronize.</p>
         ) : (
           <>
-            {aba === "Visão geral" && <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} />}
+            {aba === "Visão geral" && (
+              <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
+            )}
             {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} />}
             {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
             {aba === "Transferências" && <Transferencias id={id} />}
@@ -171,7 +173,7 @@ const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
 const COR_RESULTADO = { V: "bg-neon text-pitch-950", E: "bg-muted text-pitch-950", D: "bg-cartao text-pitch-950" };
 const BORDA_RESULTADO = { V: "border-neon", E: "border-muted", D: "border-cartao" };
 
-function VisaoGeral({ id, ano, clube }) {
+function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
   const { dados: r, erro } = useDados(() => api.resumo(id, ano), [id, ano]);
   if (erro) return <Erro mensagem={erro} />;
   if (!r) return null;
@@ -210,6 +212,14 @@ function VisaoGeral({ id, ano, clube }) {
         </dl>
       </section>
 
+      {orcamento != null && (
+        <p className="-mt-4 mb-10 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Orçamento de transferências</span>
+          <Dinheiro valor={orcamento} className="font-kit text-3xl font-bold text-gold" />
+          <span className="text-sm text-muted">em {dataBR(dataJogo)}</span>
+        </p>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center gap-4">
         <h2 className="font-kit text-2xl font-semibold uppercase">Últimos resultados</h2>
         <ol aria-label="Sequência, do mais recente ao mais antigo" className="flex gap-1">
@@ -228,8 +238,23 @@ function VisaoGeral({ id, ano, clube }) {
   );
 }
 
-// [chave, rótulo, valor para ordenar, ordem crescente?, coluna de contrato (no celular vai para baixo do nome)]
+// Códigos de posição do Player.bin, com os nomes da versão em português do PES
+const POSICOES = ["GO", "ZC", "LE", "LD", "VOL", "MLG", "MLE", "MLD", "MAT", "PTE", "PTD", "SA", "CA"];
+// Cor por setor, como nas telas do PES: goleiro, defesa, meio e ataque
+const setor = (c) => (c === 0 ? "text-pos-gol" : c <= 3 ? "text-pos-def" : c <= 8 ? "text-pos-meio" : "text-pos-ata");
+
+function Posicao({ codigo, className = "" }) {
+  if (codigo == null || !POSICOES[codigo]) return null;
+  return (
+    <span className={`inline-block w-10 rounded-sm bg-pitch-800 py-0.5 text-center font-kit text-sm font-bold ${setor(codigo)} ${className}`}>
+      {POSICOES[codigo]}
+    </span>
+  );
+}
+
+// [chave, rótulo, valor para ordenar, ordem crescente?, só a partir do sm (no celular vai para baixo do nome)]
 const COLUNAS = [
+  ["posicao", "Pos.", (l) => l.posicao ?? 99, true, true],
   ["nome", "Jogador", (l) => l.nome, true],
   ["jogos", "Jogos", (l) => l.jogos],
   ["gols", "Gols", (l) => l.gols],
@@ -262,7 +287,9 @@ function Elenco({ id, ano, dataJogo }) {
             <th
               key={k}
               aria-sort={ordem === k ? (cresc ? "ascending" : "descending") : "none"}
-              className={`py-2 font-semibold ${k === "nome" ? "" : contrato ? "hidden w-32 text-right sm:table-cell" : "w-12 text-right sm:w-20"}`}
+              className={`py-2 font-semibold ${
+                k === "nome" ? "" : k === "posicao" ? "hidden w-14 sm:table-cell" : contrato ? "hidden w-32 text-right sm:table-cell" : "w-12 text-right sm:w-20"
+              }`}
             >
               <button onClick={() => setOrdem(k)} className={ordem === k ? "text-destaque" : "hover:text-chalk"}>
                 {rotulo}
@@ -276,6 +303,9 @@ function Elenco({ id, ano, dataJogo }) {
           const c = l.contrato;
           return (
             <tr key={l.player_id} className={`border-b border-pitch-800 ${l.no_elenco ? "" : "text-muted"}`}>
+              <td className="hidden sm:table-cell">
+                <Posicao codigo={l.posicao} />
+              </td>
               <td className="py-2">
                 <div className="flex items-center gap-3">
                   <Rosto id={l.player_id} className={`size-9 ${l.no_elenco ? "" : "opacity-60 grayscale"}`} />
@@ -284,11 +314,10 @@ function Elenco({ id, ano, dataJogo }) {
                       {l.nome}
                       {!l.no_elenco && <span className="ml-2 font-kit text-sm uppercase tracking-wide">saiu</span>}
                     </span>
-                    {c && (
-                      <span className={`block text-sm sm:hidden ${vencendo(c) ? "text-gold" : "text-muted"}`}>
-                        até {dataBR(c.fim)} · {REAIS.format(c.salario_semanal)}/sem.
-                      </span>
-                    )}
+                    <span className={`flex items-center gap-2 text-sm sm:hidden ${vencendo(c) ? "text-gold" : "text-muted"}`}>
+                      <Posicao codigo={l.posicao} className="w-9 py-0 text-xs" />
+                      {c && `até ${dataBR(c.fim)} · ${REAIS.format(c.salario_semanal)}/sem.`}
+                    </span>
                   </span>
                 </div>
               </td>

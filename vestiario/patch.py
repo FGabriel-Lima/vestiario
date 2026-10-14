@@ -1,4 +1,4 @@
-"""Lê arquivos do patch na ordem de carregamento do jogo: nomes dos jogadores, escudos, minifaces e cores dos uniformes."""
+"""Lê arquivos do patch na ordem de carregamento do jogo: nomes e posições dos jogadores, escudos, minifaces e cores dos uniformes."""
 import io
 import re
 import struct
@@ -14,6 +14,9 @@ ROSTO = "common/render/symbol/player/{}.dds"
 UNICOLOR = "common/character0/model/character/uniform/team/UniColor.bin"
 WESYS = bytes.fromhex("ff10815745535953")
 REG, OFF_ID, OFF_NOME = 312, 8, 68
+# Posição registrada: 4 bits a partir do bit 434 do registro (conferido com 17 jogadores na tela do PES).
+# 0 GO, 1 ZC, 2 LE, 3 LD, 4 VOL, 5 MLG, 6 MLE, 7 MLD, 8 MAT, 9 PTE, 10 PTD, 11 SA, 12 CA
+BIT_POSICAO = 434
 
 
 def desembrulhar(blob: bytes) -> bytes:
@@ -31,6 +34,12 @@ def ler_nomes(raw: bytes) -> dict[int, str]:
         pid = struct.unpack_from("<I", raw, o + OFF_ID)[0]
         nomes[pid] = raw[o + OFF_NOME:raw.index(b"\0", o + OFF_NOME)].decode("utf8", "replace")
     return nomes
+
+
+def ler_posicoes(raw: bytes) -> dict[int, int]:
+    byte, bit = divmod(BIT_POSICAO, 8)
+    return {struct.unpack_from("<I", raw, o + OFF_ID)[0]: (raw[o + byte] >> bit) & 0xF
+            for o in range(0, len(raw) - REG + 1, REG)}
 
 
 def ler_cores(raw: bytes) -> dict[int, list[str]]:
@@ -111,8 +120,9 @@ def ler_arquivos(pasta_pes: Path, alvos: set[str]) -> dict[str, bytes]:
     return achados
 
 
-def carregar_nomes(pasta_pes: Path) -> dict[int, str]:
+def carregar_player_bin(pasta_pes: Path) -> bytes:
+    """Player.bin já descompactado, para ler_nomes e ler_posicoes."""
     blob = ler_arquivos(pasta_pes, {ALVO}).get(ALVO)
     if blob is None:
         raise FileNotFoundError(f"Player.bin não encontrado em {pasta_pes}")
-    return ler_nomes(desembrulhar(blob))
+    return desembrulhar(blob)

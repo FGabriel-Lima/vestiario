@@ -19,6 +19,7 @@ PID = 0x3FFFFFFF                     # bits altos do player_id são flags
 # (u32 vaga, u32 player_id, 6×0, i32 valor, u32 tipo, 2×0, u32 0xFFFF); vaga 0xFFFF = vazio.
 LIVRO0, LIVRO_TAM, LIVRO_N = 13_108_192, 52, 100
 MOEDA = 430                          # R$ por unidade de dinheiro do save (conferido nas telas do PES em 31/01/2026)
+ORCAMENTO = 13_098_240               # u32 orçamento de transferências (× MOEDA), fixo nos 3 saves conferidos
 CONTRATO_TAM = 48                    # contratos do clube do usuário; a tabela muda de lugar (veja ler_contratos)
 
 
@@ -75,6 +76,7 @@ class Save:
     elencos: list[list[int]] = field(default_factory=list)  # elenco de cada time, na ordem da tabela
     negocios: list[Negocio] = field(default_factory=list)   # livro de transferências do clube do usuário
     contratos: dict[int, Contrato] = field(default_factory=dict)  # player_id → contrato, só do clube do usuário
+    orcamento: int | None = None     # orçamento de transferências (× MOEDA = R$)
 
 
 def _cstr(b: bytes, o: int = 0) -> str:
@@ -198,4 +200,5 @@ def ler_save(raw: bytes) -> Save:
     idx = times.index(clube)
     elencos = [ler_elenco(data, i) for i in range(len(times))]
     return Save(nome, clube, data_jogo, times, idx, elencos[idx], ler_partidas(data, len(times)),
-                ler_ids(data, len(times)), elencos, ler_negocios(data), ler_contratos(data, elencos[idx]))
+                ler_ids(data, len(times)), elencos, ler_negocios(data), ler_contratos(data, elencos[idx]),
+                struct.unpack_from("<I", data, ORCAMENTO)[0])
