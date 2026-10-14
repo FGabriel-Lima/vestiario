@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS elenco(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
+  pes_id INTEGER,
   PRIMARY KEY(carreira_id, idx));
 CREATE TABLE IF NOT EXISTS jogador(player_id INTEGER PRIMARY KEY, nome TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS partida(
@@ -39,6 +40,10 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(ESQUEMA)
+    if "pes_id" not in {r[1] for r in con.execute("PRAGMA table_info(time)")}:
+        with con:  # banco anterior aos escudos: ganha a coluna e relê todos os saves para preenchê-la
+            con.execute("ALTER TABLE time ADD COLUMN pes_id INTEGER")
+            con.execute("DELETE FROM arquivo")
     return con
 
 
@@ -62,7 +67,7 @@ def marcar_arquivo(con: sqlite3.Connection, caminho: str, tamanho: int, mtime: f
 def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict:
     """Grava um save numa transação. Partida disputada nunca regride; jogos futuros vêm só do save mais recente."""
     with con:
-        # ponytail: carreira = (slot, nome do save); uma ML nova no mesmo slot com o mesmo nome padrão se mistura com a antiga (a trava de times acima pega parte disso). Achar um id de carreira no header.dat se virar problema.
+        # ponytail: carreira = (slot, nome do save); uma ML nova no mesmo slot com o mesmo nome padrão se mistura com a antiga (a trava de times logo abaixo quase nunca pega isso, porque o patch é o mesmo). Achar um id de carreira no header.dat se virar problema.
         cid = con.execute("INSERT INTO carreira(slot, nome) VALUES(?, ?) ON CONFLICT DO UPDATE "
                           "SET nome = excluded.nome RETURNING id", (slot, save.nome)).fetchone()[0]
         guardados = {r[0]: r[1] for r in con.execute("SELECT idx, nome FROM time WHERE carreira_id = ?", (cid,))}
@@ -79,8 +84,9 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
         ).fetchone()[0]
         con.executemany("INSERT INTO elenco VALUES(?, ?)", [(sid, p) for p in save.elenco])
         if mais_recente:
-            con.executemany("INSERT INTO time VALUES(?, ?, ?) ON CONFLICT DO UPDATE SET nome = excluded.nome",
-                            [(cid, i, n) for i, n in enumerate(save.times)])
+            con.executemany("INSERT INTO time VALUES(?, ?, ?, ?) ON CONFLICT DO UPDATE "
+                            "SET nome = excluded.nome, pes_id = excluded.pes_id",
+                            [(cid, i, n, save.ids[i] if save.ids else None) for i, n in enumerate(save.times)])
 
         existentes = {(r[0], r[1], r[2]): r[3] for r in con.execute(
             "SELECT data, mandante_idx, visitante_idx, disputada FROM partida WHERE carreira_id = ?", (cid,))}
@@ -121,16 +127,24 @@ def _ultima(con: sqlite3.Connection, cid: int) -> sqlite3.Row | None:
 
 def carreiras(con: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in con.execute(
-        "SELECT c.id, c.slot, c.nome, s.clube_nome, s.data_jogo, s.em FROM carreira c "
+        "SELECT c.id, c.slot, c.nome, s.clube_nome, s.data_jogo, s.em, t.pes_id AS escudo FROM carreira c "
         "JOIN sincronizacao s ON s.id = (SELECT id FROM sincronizacao WHERE carreira_id = c.id "
-        "ORDER BY data_jogo DESC, id DESC LIMIT 1) ORDER BY s.em DESC, c.id")]
+        "ORDER BY data_jogo DESC, id DESC LIMIT 1) "
+        "LEFT JOIN time t ON t.carreira_id = c.id AND t.idx = s.clube_idx ORDER BY s.em DESC, c.id")]
 
 
 def carreira(con: sqlite3.Connection, cid: int) -> dict | None:
     s = _ultima(con, cid)
     if s is None:
         return None
-    return {"id": cid, "clube_nome": s["clube_nome"], "clube_idx": s["clube_idx"], "data_jogo": s["data_jogo"]}
+    escudo = con.execute("SELECT pes_id FROM time WHERE carreira_id = ? AND idx = ?", (cid, s["clube_idx"])).fetchone()
+    return {"id": cid, "clube_nome": s["clube_nome"], "clube_idx": s["clube_idx"], "data_jogo": s["data_jogo"],
+            "escudo": escudo[0] if escudo else None}
+
+
+def escudos(con: sqlite3.Connection) -> set[int]:
+    """Ids PES de todos os times conhecidos, para extrair os escudos."""
+    return {r[0] for r in con.execute("SELECT DISTINCT pes_id FROM time WHERE pes_id IS NOT NULL")}
 
 
 # ponytail: temporada = ano civil da partida (certo no Brasileirão, errado em ligas europeias);
@@ -145,7 +159,8 @@ def temporadas(con: sqlite3.Connection, cid: int) -> list[int]:
 def partidas(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
     clube = _ultima(con, cid)["clube_idx"]
     return [dict(r) for r in con.execute(
-        "SELECT p.id, p.data, p.mandante_idx, tm.nome AS mandante, p.visitante_idx, tv.nome AS visitante,"
+        "SELECT p.id, p.data, p.mandante_idx, tm.nome AS mandante, tm.pes_id AS mandante_escudo,"
+        " p.visitante_idx, tv.nome AS visitante, tv.pes_id AS visitante_escudo,"
         " p.gols_mandante, p.gols_visitante, p.penaltis_mandante, p.penaltis_visitante, p.disputada "
         "FROM partida p "
         "LEFT JOIN time tm ON tm.carreira_id = p.carreira_id AND tm.idx = p.mandante_idx "

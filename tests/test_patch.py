@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vestiario.patch import REG, WESYS, carregar_nomes
+from vestiario.patch import REG, WESYS, carregar_nomes, ler_arquivos
 
 
 def player_bin(jogadores: dict[int, str]) -> bytes:
@@ -51,3 +51,21 @@ def test_player_bin_corrompido_vira_valueerror(tmp_path):
     (tmp_path / "SiderAddons" / "sider.ini").write_text(r'cpk.root = ".\livecpk\root"' + "\n", encoding="utf8")
     with pytest.raises(ValueError, match="corrompido"):
         carregar_nomes(tmp_path)
+
+
+def test_ler_arquivos_do_sider_ignora_os_que_nao_existem(tmp_path):
+    flag = tmp_path / "SiderAddons" / "livecpk" / "root" / "common/render/symbol/flag"
+    flag.mkdir(parents=True)
+    (flag / "e_000007_r.png").write_bytes(b"png 7")
+    (tmp_path / "SiderAddons" / "sider.ini").write_text(r'cpk.root = ".\livecpk\root"' + "\n", encoding="utf8")
+    alvos = {"common/render/symbol/flag/e_000007_r.png", "common/render/symbol/flag/e_000008_r.png"}
+    assert ler_arquivos(tmp_path, alvos) == {"common/render/symbol/flag/e_000007_r.png": b"png 7"}
+
+
+def test_escudos_instalados():
+    pes = Path(r"D:\Transferpatch")
+    if not pes.exists():
+        pytest.skip(r"Transfer Patch não instalado em D:\Transferpatch")
+    sp, real = "common/render/symbol/flag/e_001255_r.png", "common/render/symbol/flag/e_000109_r.png"
+    achados = ler_arquivos(pes, {sp, real})          # São Paulo vem do Sider, Real Madrid do dt15 do jogo
+    assert achados[sp][:4] == achados[real][:4] == b"\x89PNG"

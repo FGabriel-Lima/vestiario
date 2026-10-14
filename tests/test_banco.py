@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime
 
 import pytest
@@ -124,3 +125,29 @@ def test_elenco_de_temporada_passada_nao_inclui_contratados_depois(con):
         partida("2025-06-01", 0, 1, (1, 0), [atuacao(10, 0, 1)])], elenco=(10, 12)), AGORA)
     assert [l["nome"] for l in banco.elenco(con, 1, 2025)] == ["Veterano"]
     assert {l["nome"] for l in banco.elenco(con, 1, 2026)} == {"Novato", "Veterano"}
+
+
+def test_escudos_dos_times(con):
+    save = fazer_save("2026-03-01", [partida("2026-01-22", 0, 1, (2, 1), [atuacao(10, 0, 2)])])
+    save.ids = [1255, 137, 9]
+    banco.gravar(con, "ML00000000", save, AGORA)
+    assert banco.carreiras(con)[0]["escudo"] == 1255
+    assert banco.carreira(con, 1)["escudo"] == 1255
+    p = banco.partidas(con, 1, 2026)[0]
+    assert (p["mandante_escudo"], p["visitante_escudo"]) == (1255, 137)
+    assert banco.escudos(con) == {1255, 137, 9}
+
+
+def test_banco_antigo_ganha_coluna_de_escudo_e_relê_os_saves(tmp_path):
+    caminho = tmp_path / "v.db"
+    antigo = sqlite3.connect(caminho)
+    antigo.executescript("CREATE TABLE time(carreira_id INTEGER NOT NULL, idx INTEGER NOT NULL, nome TEXT NOT NULL,"
+                         " PRIMARY KEY(carreira_id, idx));"
+                         "CREATE TABLE arquivo(caminho TEXT PRIMARY KEY, tamanho INTEGER NOT NULL, mtime REAL NOT NULL);"
+                         "INSERT INTO arquivo VALUES('x/ML00000000', 1, 1.0);")
+    antigo.commit()
+    antigo.close()
+    con = banco.conectar(caminho)
+    assert "pes_id" in {r[1] for r in con.execute("PRAGMA table_info(time)")}
+    assert contar(con, "SELECT count(*) FROM arquivo") == 0
+    con.close()

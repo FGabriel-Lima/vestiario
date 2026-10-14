@@ -4,6 +4,7 @@ from contextlib import closing
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -24,6 +25,10 @@ def _con():
     return closing(banco.conectar(DB))
 
 
+def _escudos() -> Path:
+    return DB.parent / "escudos"
+
+
 def _carreira(con, cid: int) -> dict:
     c = banco.carreira(con, cid)
     if c is None:
@@ -35,9 +40,17 @@ def _carreira(con, cid: int) -> dict:
 def post_sincronizar():
     with _con() as con:
         try:
-            return sincronizar(con, SAVES, PES)
+            return sincronizar(con, SAVES, PES, _escudos())
         except FileNotFoundError as e:
             raise HTTPException(404, str(e))
+
+
+@app.get("/api/escudos/{pes_id}")
+def get_escudo(pes_id: int):
+    arq = _escudos() / f"{pes_id}.png"
+    if not arq.is_file():
+        raise HTTPException(404, "Escudo não encontrado")
+    return FileResponse(arq, media_type="image/png")
 
 
 @app.get("/api/carreiras")

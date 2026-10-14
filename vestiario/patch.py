@@ -1,4 +1,4 @@
-"""Acha o Player.bin que o jogo carrega e devolve {player_id: nome}."""
+"""Lê arquivos do patch na ordem de carregamento do jogo: nomes dos jogadores e escudos."""
 import re
 import struct
 import zlib
@@ -28,47 +28,60 @@ def ler_nomes(raw: bytes) -> dict[int, str]:
     return nomes
 
 
-def _do_sider(pasta_pes: Path) -> bytes | None:
-    """Pastas cpk.root do sider.ini, na ordem do arquivo: a primeira que tiver o Player.bin vence."""
+def _raizes_sider(pasta_pes: Path) -> list[Path]:
+    """Pastas cpk.root do sider.ini, na ordem do arquivo (a primeira tem prioridade)."""
     ini = pasta_pes / "SiderAddons" / "sider.ini"
     if not ini.exists():
-        return None
-    for linha in ini.read_text(encoding="utf8", errors="replace").splitlines():
-        m = re.match(r'\s*cpk\.root\s*=\s*"(.+)"', linha)
-        if m:
-            arq = pasta_pes / "SiderAddons" / m.group(1).replace("\\", "/") / ALVO
-            if arq.exists():
-                return arq.read_bytes()
-    return None
+        return []
+    return [pasta_pes / "SiderAddons" / m.group(1).replace("\\", "/")
+            for linha in ini.read_text(encoding="utf8", errors="replace").splitlines()
+            if (m := re.match(r'\s*cpk\.root\s*=\s*"(.+)"', linha))]
 
 
-def _do_download(pasta_pes: Path) -> bytes | None:
-    """CPKs de download/ na ordem do spFileList.bin: o último que tiver o Player.bin vence."""
+def _cpks(pasta_pes: Path) -> list[Path]:
+    """CPKs em ordem crescente de prioridade: os do jogo (data/) e depois os de download/, na ordem do spFileList.bin."""
+    cpks = sorted((pasta_pes / "data").glob("*.cpk"))
     lista = pasta_pes / "download" / "spFileList.bin"
-    if not lista.exists():
-        return None
-    fl = lista.read_bytes()
-    achado = None
-    for o in range(4, len(fl) - 47, 48):
-        nome = fl[o + 12:o + 48].split(b"\0")[0].decode("ascii", "replace")
-        caminho = pasta_pes / "download" / nome
-        if nome and caminho.is_file():
+    if lista.exists():
+        fl = lista.read_bytes()
+        for o in range(4, len(fl) - 47, 48):
+            nome = fl[o + 12:o + 48].split(b"\0")[0].decode("ascii", "replace")
+            if nome and (pasta_pes / "download" / nome).is_file():
+                cpks.append(pasta_pes / "download" / nome)
+    return cpks
+
+
+def ler_arquivos(pasta_pes: Path, alvos: set[str]) -> dict[str, bytes]:
+    """Lê os arquivos do jogo na mesma ordem que ele carrega: Sider, depois CPKs (o último que tiver vence).
+    Alvos que não existem em lugar nenhum ficam fora do resultado."""
+    achados = {}
+    for raiz in _raizes_sider(pasta_pes):
+        for alvo in alvos - achados.keys():
+            if (raiz / alvo).is_file():
+                achados[alvo] = (raiz / alvo).read_bytes()
+    faltam = {a.lower(): a for a in alvos - achados.keys()}
+    if not faltam:
+        return achados
+    nos_cpks = {}
+    for caminho in _cpks(pasta_pes):
+        try:
             with open(caminho, "rb") as f:
-                for e in cpk.toc(f):
-                    if e["path"].lower() == ALVO.lower():
-                        achado = (caminho, e)
-    if achado is None:
-        return None
-    caminho, e = achado
-    if e["FileSize"] != e.get("ExtractSize", e["FileSize"]):
-        raise ValueError(f"Player.bin comprimido dentro de {caminho.name} (CRILAYLA não suportado)")
-    with open(caminho, "rb") as f:
-        f.seek(e["abs"])
-        return f.read(e["FileSize"])
+                toc = cpk.toc(f)
+        except Exception:  # alguns CPKs do jogo usam um formato que o leitor não entende; não têm o que buscamos
+            continue
+        for e in toc:
+            # ponytail: entrada comprimida (CRILAYLA) é ignorada; nenhum Player.bin ou escudo conhecido vem assim
+            if (alvo := faltam.get(e["path"].lower())) and e["FileSize"] == e.get("ExtractSize", e["FileSize"]):
+                nos_cpks[alvo] = (caminho, e)
+    for alvo, (caminho, e) in nos_cpks.items():
+        with open(caminho, "rb") as f:
+            f.seek(e["abs"])
+            achados[alvo] = f.read(e["FileSize"])
+    return achados
 
 
 def carregar_nomes(pasta_pes: Path) -> dict[int, str]:
-    blob = _do_sider(pasta_pes) or _do_download(pasta_pes)
+    blob = ler_arquivos(pasta_pes, {ALVO}).get(ALVO)
     if blob is None:
         raise FileNotFoundError(f"Player.bin não encontrado em {pasta_pes}")
     return ler_nomes(desembrulhar(blob))

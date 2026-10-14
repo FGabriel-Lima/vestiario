@@ -3,8 +3,8 @@ from datetime import date
 
 import pytest
 
-from vestiario.leitor import (PARTIDA0, PARTIDA_TAM, PARTIDAS, VAZIO, FormatoInvalido, ler_descricao,
-                              ler_partidas)
+from vestiario.leitor import (PARTIDA0, PARTIDA_TAM, PARTIDAS, TIME_ID, TIME_TAM, VAZIO, FormatoInvalido,
+                              ler_descricao, ler_ids, ler_partidas)
 
 
 def tabela_vazia() -> bytearray:
@@ -84,3 +84,19 @@ def test_save_real_placar_bate_com_escalacao(save_atual):
     for p in jogadas:
         soma = [sum(a.gols for a in p.escalacao if a.lado == lado) for lado in (0, 1)]
         assert list(p.gols) == soma, p
+
+
+def test_ids_pes_dos_times():
+    data = bytearray(3 * TIME_TAM + 100)
+    for i, pes_id in enumerate((101, 1255, 9)):
+        struct.pack_into("<I", data, i * TIME_TAM + TIME_ID, pes_id << 14 | i)
+    assert ler_ids(bytes(data), 3) == [101, 1255, 9]
+    struct.pack_into("<I", data, 2 * TIME_TAM + TIME_ID, 9 << 14 | 7)
+    with pytest.raises(FormatoInvalido, match="time 2"):
+        ler_ids(bytes(data), 3)
+
+
+def test_save_real_ids_pes(save_atual):
+    assert len(save_atual.ids) == len(save_atual.times)
+    assert save_atual.ids[0] == 101                                 # Arsenal
+    assert save_atual.ids[save_atual.clube_idx] == 1255             # São Paulo

@@ -1,11 +1,12 @@
 """Lê um save da Master League do PES 2021 (Football Life 2026 / Transfer Patch). Tudo na memória."""
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from .pesdecrypt import decrypt
 
 TIME0, TIME_TAM = 84, 1680           # nome do time i em TIME0 + i*TIME_TAM
+TIME_ID = 80                         # u32 em i*TIME_TAM + TIME_ID: id do time no PES << 14 | i
 ELENCO = 412                         # (u32 vaga, u32 player_id) a partir de i*TIME_TAM + ELENCO
 PARTIDA0, PARTIDA_TAM, PARTIDAS = 3_316_488, 596, 13_000
 VAGAS, VAGA_TAM = 34, 16             # 17 por lado, mandante primeiro
@@ -49,6 +50,7 @@ class Save:
     clube_idx: int
     elenco: list[int]                # player_ids do clube do usuário
     partidas: list[Partida]
+    ids: list[int] = field(default_factory=list)  # id PES de cada time (o do escudo)
 
 
 def _cstr(b: bytes, o: int = 0) -> str:
@@ -68,6 +70,16 @@ def ler_times(data: bytes) -> list[str]:
     while TIME0 + len(times) * TIME_TAM < PARTIDA0 and data[TIME0 + len(times) * TIME_TAM]:
         times.append(_cstr(data, TIME0 + len(times) * TIME_TAM))
     return times
+
+
+def ler_ids(data: bytes, n_times: int) -> list[int]:
+    ids = []
+    for i in range(n_times):
+        v = struct.unpack_from("<I", data, i * TIME_TAM + TIME_ID)[0]
+        if v & INDEFINIDO != i:
+            raise FormatoInvalido(f"time {i}: id PES não confere com o índice")
+        ids.append(v >> 14)
+    return ids
 
 
 def ler_elenco(data: bytes, idx: int) -> list[int]:
@@ -117,4 +129,5 @@ def ler_save(raw: bytes) -> Save:
     if clube not in times:
         raise FormatoInvalido(f"clube {clube!r} não está na tabela de times")
     idx = times.index(clube)
-    return Save(nome, clube, data_jogo, times, idx, ler_elenco(data, idx), ler_partidas(data, len(times)))
+    return Save(nome, clube, data_jogo, times, idx, ler_elenco(data, idx), ler_partidas(data, len(times)),
+                ler_ids(data, len(times)))

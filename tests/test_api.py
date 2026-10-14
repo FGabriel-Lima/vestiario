@@ -77,3 +77,31 @@ def test_erro_ao_gravar_pula_so_aquele_arquivo(cliente, monkeypatch):
 
 def test_host_estranho_e_recusado(cliente):
     assert cliente.get("/api/carreiras", headers={"host": "evil.example"}).status_code == 400
+
+
+def test_escudo(cliente):
+    pasta = api.DB.parent / "escudos"
+    pasta.mkdir(parents=True)
+    (pasta / "1255.png").write_bytes(b"\x89PNG fake")
+    r = cliente.get("/api/escudos/1255")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content == b"\x89PNG fake"
+    assert cliente.get("/api/escudos/1256").status_code == 404
+
+
+def test_sincronizar_extrai_so_os_escudos_que_existem(cliente, monkeypatch):
+    flag = api.PES / "SiderAddons" / "livecpk" / "root" / "common/render/symbol/flag"
+    flag.mkdir(parents=True)
+    (flag / "e_000007_r.png").write_bytes(b"png 7")
+    (api.PES / "SiderAddons" / "sider.ini").write_text(r'cpk.root = ".\livecpk\root"' + "\n", encoding="utf8")
+    api.SAVES.mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"Liga Master 01")
+
+    def ler_save(raw):
+        save = fazer_save(nome=raw.decode())
+        save.ids = [7, 8, 9]
+        return save
+
+    monkeypatch.setattr(leitor, "ler_save", ler_save)
+    cliente.post("/api/sincronizar")
+    assert sorted(p.name for p in (api.DB.parent / "escudos").iterdir()) == ["7.png"]
+    assert cliente.get("/api/escudos/7").content == b"png 7"
