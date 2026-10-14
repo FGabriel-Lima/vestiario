@@ -7,21 +7,30 @@ export default function Carreira({ id, onVoltar }) {
   const [carreira, setCarreira] = useState(null);
   const [ano, setAno] = useState(null);
   const [aba, setAba] = useState(ABAS[0]);
+  const [erro, setErro] = useState(null);
 
   useEffect(() => {
-    api.carreira(id).then((c) => {
-      setCarreira(c);
-      setAno(c.temporadas[0] ?? null);
-    });
+    api
+      .carreira(id)
+      .then((c) => {
+        setCarreira(c);
+        setAno(c.temporadas[0] ?? null);
+      })
+      .catch((e) => setErro(e.message));
   }, [id]);
 
+  const voltar = (
+    <button onClick={onVoltar} className="mb-4 text-muted hover:text-chalk">
+      <span className="icone">arrow_back</span> Carreiras
+    </button>
+  );
+
+  if (erro) return (<>{voltar}<Erro mensagem={erro} /></>);
   if (!carreira) return <p className="text-muted">Carregando…</p>;
 
   return (
     <>
-      <button onClick={onVoltar} className="mb-4 text-muted hover:text-chalk">
-        <span className="icone">arrow_back</span> Carreiras
-      </button>
+      {voltar}
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-kit text-5xl font-bold uppercase">{carreira.clube_nome}</h1>
@@ -69,16 +78,27 @@ export default function Carreira({ id, onVoltar }) {
 }
 
 function useDados(buscar, deps) {
-  const [dados, setDados] = useState(null);
+  const [estado, setEstado] = useState({ dados: null, erro: null });
   useEffect(() => {
-    setDados(null);
-    buscar().then(setDados);
-  }, deps);
-  return dados;
+    let valido = true;
+    setEstado({ dados: null, erro: null });
+    buscar()
+      .then((dados) => valido && setEstado({ dados, erro: null }))
+      .catch((e) => valido && setEstado({ dados: null, erro: e.message }));
+    return () => {
+      valido = false;
+    };
+  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  return estado;
+}
+
+function Erro({ mensagem }) {
+  return <p className="rounded-lg bg-red-900/60 p-3">{mensagem}</p>;
 }
 
 function VisaoGeral({ id, ano, clube }) {
-  const r = useDados(() => api.resumo(id, ano), [id, ano]);
+  const { dados: r, erro } = useDados(() => api.resumo(id, ano), [id, ano]);
+  if (erro) return <Erro mensagem={erro} />;
   if (!r) return null;
   const numeros = [
     ["Jogos", r.jogos],
@@ -105,8 +125,9 @@ function VisaoGeral({ id, ano, clube }) {
 }
 
 function Elenco({ id, ano }) {
-  const linhas = useDados(() => api.elenco(id, ano), [id, ano]);
+  const { dados: linhas, erro } = useDados(() => api.elenco(id, ano), [id, ano]);
   const [ordem, setOrdem] = useState("jogos");
+  if (erro) return <Erro mensagem={erro} />;
   if (!linhas) return null;
   const ordenadas = [...linhas].sort((a, b) => (ordem === "nome" ? a.nome.localeCompare(b.nome) : b[ordem] - a[ordem]));
   const colunas = [
@@ -145,7 +166,8 @@ function Elenco({ id, ano }) {
 }
 
 function Partidas({ id, ano, clube }) {
-  const ps = useDados(() => api.partidas(id, ano), [id, ano]);
+  const { dados: ps, erro } = useDados(() => api.partidas(id, ano), [id, ano]);
+  if (erro) return <Erro mensagem={erro} />;
   if (!ps) return null;
   const futuras = ps.filter((p) => !p.disputada);
   return (
@@ -186,7 +208,8 @@ function ListaPartidas({ partidas, clube }) {
 }
 
 function Lendas({ id }) {
-  const l = useDados(() => api.lendas(id), [id]);
+  const { dados: l, erro } = useDados(() => api.lendas(id), [id]);
+  if (erro) return <Erro mensagem={erro} />;
   if (!l) return null;
   const rankings = [
     ["Artilheiros", "gols", l.artilheiros],
