@@ -104,3 +104,95 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
             con.executemany("INSERT INTO escalacao VALUES(?, ?, ?, ?, ?)",
                             [(pid, a.player_id, a.lado, a.gols, a.assistencias) for a in p.escalacao])
         return {"carreira_id": cid, "novas": novas, "atualizadas": atualizadas}
+
+
+# --- consultas para as telas -------------------------------------------------
+
+def _ultima(con: sqlite3.Connection, cid: int) -> sqlite3.Row | None:
+    return con.execute("SELECT * FROM sincronizacao WHERE carreira_id = ? ORDER BY data_jogo DESC, id DESC LIMIT 1",
+                       (cid,)).fetchone()
+
+
+def carreiras(con: sqlite3.Connection) -> list[dict]:
+    return [dict(r) for r in con.execute(
+        "SELECT c.id, c.slot, c.nome, s.clube_nome, s.data_jogo, s.em FROM carreira c "
+        "JOIN sincronizacao s ON s.id = (SELECT id FROM sincronizacao WHERE carreira_id = c.id "
+        "ORDER BY data_jogo DESC, id DESC LIMIT 1) ORDER BY s.em DESC, c.id")]
+
+
+def carreira(con: sqlite3.Connection, cid: int) -> dict | None:
+    s = _ultima(con, cid)
+    if s is None:
+        return None
+    return {"id": cid, "clube_nome": s["clube_nome"], "clube_idx": s["clube_idx"], "data_jogo": s["data_jogo"]}
+
+
+# ponytail: temporada = ano civil da partida (certo no Brasileirão, errado em ligas europeias);
+# trocar quando o campo de competição for decodificado.
+def temporadas(con: sqlite3.Connection, cid: int) -> list[int]:
+    clube = _ultima(con, cid)["clube_idx"]
+    return [int(r[0]) for r in con.execute(
+        "SELECT DISTINCT substr(data, 1, 4) FROM partida "
+        "WHERE carreira_id = ? AND ? IN (mandante_idx, visitante_idx) ORDER BY 1 DESC", (cid, clube))]
+
+
+def partidas(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
+    clube = _ultima(con, cid)["clube_idx"]
+    return [dict(r) for r in con.execute(
+        "SELECT p.id, p.data, p.mandante_idx, tm.nome AS mandante, p.visitante_idx, tv.nome AS visitante,"
+        " p.gols_mandante, p.gols_visitante, p.penaltis_mandante, p.penaltis_visitante, p.disputada "
+        "FROM partida p "
+        "LEFT JOIN time tm ON tm.carreira_id = p.carreira_id AND tm.idx = p.mandante_idx "
+        "LEFT JOIN time tv ON tv.carreira_id = p.carreira_id AND tv.idx = p.visitante_idx "
+        "WHERE p.carreira_id = ? AND ? IN (p.mandante_idx, p.visitante_idx) AND substr(p.data, 1, 4) = ? "
+        "ORDER BY p.data", (cid, clube, str(ano)))]
+
+
+def resumo(con: sqlite3.Connection, cid: int, ano: int) -> dict:
+    clube = _ultima(con, cid)["clube_idx"]
+    r = {"jogos": 0, "vitorias": 0, "empates": 0, "derrotas": 0, "gols_pro": 0, "gols_contra": 0}
+    jogadas = [p for p in partidas(con, cid, ano) if p["disputada"]]
+    for p in jogadas:
+        pro, contra = ((p["gols_mandante"], p["gols_visitante"]) if p["mandante_idx"] == clube
+                       else (p["gols_visitante"], p["gols_mandante"]))
+        r["jogos"] += 1
+        r["gols_pro"] += pro
+        r["gols_contra"] += contra
+        r["vitorias" if pro > contra else "derrotas" if pro < contra else "empates"] += 1
+    r["ultimas"] = jogadas[-5:][::-1]
+    return r
+
+
+# ponytail: o clube é o da sincronização mais recente; se o usuário trocar de clube, a história do anterior some daqui.
+_ESTATS = (
+    "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) AS nome, count(*) AS jogos,"
+    " sum(e.gols) AS gols, sum(e.assistencias) AS assistencias "
+    "FROM escalacao e JOIN partida p ON p.id = e.partida_id LEFT JOIN jogador j ON j.player_id = e.player_id "
+    "WHERE p.carreira_id = :cid AND e.lado = CASE :clube WHEN p.mandante_idx THEN 0 WHEN p.visitante_idx THEN 1 END "
+)
+
+
+def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
+    """Estatísticas do clube no ano + quem está no elenco atual, mesmo sem jogos."""
+    s = _ultima(con, cid)
+    linhas = {r["player_id"]: dict(r) for r in con.execute(
+        _ESTATS + "AND substr(p.data, 1, 4) = :ano GROUP BY e.player_id",
+        {"cid": cid, "clube": s["clube_idx"], "ano": str(ano)})}
+    atuais = {r[0]: r[1] for r in con.execute(
+        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) FROM elenco e "
+        "LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.sincronizacao_id = ?", (s["id"],))}
+    for pid, nome in atuais.items():
+        linhas.setdefault(pid, {"player_id": pid, "nome": nome, "jogos": 0, "gols": 0, "assistencias": 0})
+    for pid, linha in linhas.items():
+        linha["no_elenco"] = pid in atuais
+    return sorted(linhas.values(), key=lambda l: (-l["jogos"], l["nome"]))
+
+
+def lendas(con: sqlite3.Connection, cid: int, limite: int = 10) -> dict:
+    s = _ultima(con, cid)
+    todos = [dict(r) for r in con.execute(_ESTATS + "GROUP BY e.player_id", {"cid": cid, "clube": s["clube_idx"]})]
+
+    def top(k):
+        return sorted(todos, key=lambda l: (-l[k], l["nome"]))[:limite]
+
+    return {"artilheiros": top("gols"), "garcons": top("assistencias"), "mais_jogos": top("jogos")}

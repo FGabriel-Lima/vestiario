@@ -78,3 +78,32 @@ def test_save_antigo_com_jogo_que_o_banco_tem_como_futuro(con):
     assert r["atualizadas"] == 1
     assert [tuple(x) for x in con.execute("SELECT gols_mandante, disputada FROM partida")] == [(1, 1)]
     assert contar(con, "SELECT count(*) FROM escalacao") == 1
+
+
+def test_consultas(con):
+    banco.gravar_nomes(con, {10: "Artilheiro", 11: "Garçom", 12: "Reserva"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2025-11-01", 1, 0, (0, 1), [atuacao(10, 1, 1), atuacao(99, 0)]),
+        partida("2026-01-22", 0, 1, (2, 1), [atuacao(10, 0, 2), atuacao(11, 0, 0, 2), atuacao(50, 1, 1)]),
+        partida("2026-02-01", 2, 0, (1, 1), [atuacao(11, 1, 1), atuacao(10, 1)]),
+        partida("2026-02-08", 0, 2, (0, 2), [atuacao(10, 0)]),
+        partida("2026-05-01", 0, 1),
+    ]), AGORA)
+
+    assert banco.carreiras(con)[0]["clube_nome"] == "Clube A"
+    assert banco.temporadas(con, 1) == [2026, 2025]
+
+    r = banco.resumo(con, 1, 2026)
+    assert {k: r[k] for k in ("jogos", "vitorias", "empates", "derrotas", "gols_pro", "gols_contra")} == {
+        "jogos": 3, "vitorias": 1, "empates": 1, "derrotas": 1, "gols_pro": 3, "gols_contra": 4}
+    assert r["ultimas"][0]["data"] == "2026-02-08"
+
+    assert len(banco.partidas(con, 1, 2026)) == 4
+
+    el = {l["nome"]: (l["jogos"], l["gols"], l["assistencias"], l["no_elenco"]) for l in banco.elenco(con, 1, 2026)}
+    assert el == {"Artilheiro": (3, 2, 0, True), "Garçom": (2, 1, 2, True), "Reserva": (0, 0, 0, True)}
+
+    lendas = banco.lendas(con, 1)
+    assert [(l["nome"], l["gols"]) for l in lendas["artilheiros"][:2]] == [("Artilheiro", 3), ("Garçom", 1)]
+    assert lendas["garcons"][0]["nome"] == "Garçom"
+    assert lendas["mais_jogos"][0]["jogos"] == 4
