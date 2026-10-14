@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Paleta "gramado à noite" do fifa-career-mode-manager */
+@theme {
+  --color-pitch-950: #0b1a10;
+  --color-pitch-900: #112417;
+  --color-pitch-800: #183020;
+  --color-pitch-700: #22412c;
+  --color-chalk: #eef5ee;
+  --color-muted: #9db5a3;
+  --color-neon: #11d411;
+  --color-gold: #e7c35a;
+  --font-sans: "Lexend", system-ui, sans-serif;
+  --font-kit: "Barlow Condensed", "Arial Narrow", sans-serif;
+}
+
+body {
+  @apply bg-pitch-950 text-chalk font-sans antialiased;
+}
+
+.icone {
+  font-family: "Material Symbols Outlined";
+  font-size: 1.25rem;
+  line-height: 1;
+  vertical-align: middle;
+}
