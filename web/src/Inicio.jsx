@@ -54,7 +54,7 @@ export default function Inicio({ onAbrir }) {
         </p>
       )}
       {carreiras?.length > 0 && (
-        <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {carreiras.map((c, i) => (
             <li key={c.id}>
               <button

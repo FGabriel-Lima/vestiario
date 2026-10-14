@@ -29,6 +29,10 @@ def _escudos() -> Path:
     return DB.parent / "escudos"
 
 
+def _rostos() -> Path:
+    return DB.parent / "rostos"
+
+
 def _carreira(con, cid: int) -> dict:
     c = banco.carreira(con, cid)
     if c is None:
@@ -40,7 +44,7 @@ def _carreira(con, cid: int) -> dict:
 def post_sincronizar():
     with _con() as con:
         try:
-            return sincronizar(con, SAVES, PES, _escudos())
+            return sincronizar(con, SAVES, PES, _escudos(), _rostos())
         except FileNotFoundError as e:
             raise HTTPException(404, str(e))
 
@@ -50,6 +54,14 @@ def get_escudo(pes_id: int):
     arq = _escudos() / f"{pes_id}.png"
     if not arq.is_file():
         raise HTTPException(404, "Escudo não encontrado")
+    return FileResponse(arq, media_type="image/png")
+
+
+@app.get("/api/rostos/{player_id}")
+def get_rosto(player_id: int):
+    arq = _rostos() / f"{player_id}.png"
+    if not arq.is_file():
+        raise HTTPException(404, "Miniface não encontrada")
     return FileResponse(arq, media_type="image/png")
 
 
@@ -84,6 +96,36 @@ def get_partidas(cid: int, ano: int):
     with _con() as con:
         _carreira(con, cid)
         return banco.partidas(con, cid, ano)
+
+
+@app.get("/api/carreiras/{cid}/partidas/{pid}")
+def get_partida(cid: int, pid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        if (p := banco.partida(con, cid, pid)) is None:
+            raise HTTPException(404, "Partida não encontrada")
+        return p
+
+
+@app.get("/api/carreiras/{cid}/confrontos")
+def get_confrontos(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return banco.confrontos(con, cid)
+
+
+@app.get("/api/carreiras/{cid}/transferencias")
+def get_transferencias(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return banco.transferencias(con, cid)
+
+
+@app.get("/api/carreiras/{cid}/mundo")
+def get_mundo(cid: int, ano: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return banco.mundo(con, cid, ano)
 
 
 @app.get("/api/carreiras/{cid}/lendas")

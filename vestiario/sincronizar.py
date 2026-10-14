@@ -6,20 +6,32 @@ from pathlib import Path
 from . import banco, leitor, patch
 
 
-def extrair_escudos(con: sqlite3.Connection, pasta_pes: Path, pasta_escudos: Path) -> int:
-    """Copia do patch para pasta_escudos/<id>.png os escudos que ainda faltam. Devolve quantos copiou."""
-    pasta_escudos.mkdir(parents=True, exist_ok=True)
-    ja_tem = {int(p.stem) for p in pasta_escudos.glob("*.png") if p.stem.isdigit()}
-    alvos = {f"common/render/symbol/flag/e_{i:06d}_r.png": i for i in banco.escudos(con) - ja_tem}
-    if not alvos:
-        return 0
-    achados = patch.ler_arquivos(pasta_pes, set(alvos))
-    for alvo, png in achados.items():
-        (pasta_escudos / f"{alvos[alvo]}.png").write_bytes(png)
+def _faltam(pasta: Path, ids: set[int]) -> set[int]:
+    pasta.mkdir(parents=True, exist_ok=True)
+    return ids - {int(p.stem) for p in pasta.glob("*.png") if p.stem.isdigit()}
+
+
+def extrair_do_patch(con: sqlite3.Connection, pasta_pes: Path, pasta_escudos: Path, pasta_rostos: Path) -> int:
+    """Grava as cores dos uniformes de todos os times e copia do patch os escudos (pasta_escudos/<id>.png)
+    e as minifaces dos jogadores do clube (pasta_rostos/<player_id>.png) que ainda faltam. Devolve quantas copiou."""
+    escudos = {f"common/render/symbol/flag/e_{i:06d}_r.png": i for i in _faltam(pasta_escudos, banco.escudos(con))}
+    rostos = {patch.ROSTO.format(i): i for i in _faltam(pasta_rostos, banco.rostos(con))}
+    achados = patch.ler_arquivos(pasta_pes, {*escudos, *rostos, patch.UNICOLOR})
+    if (uni := achados.pop(patch.UNICOLOR, None)) is not None:
+        banco.gravar_cores(con, patch.ler_cores(patch.desembrulhar(uni)))
+    for alvo, blob in achados.items():
+        if alvo in escudos:
+            (pasta_escudos / f"{escudos[alvo]}.png").write_bytes(blob)
+        else:
+            try:
+                (pasta_rostos / f"{rostos[alvo]}.png").write_bytes(patch.dds_para_png(blob))
+            except Exception:  # um DDS que o Pillow não entende só deixa aquele jogador sem foto
+                pass
     return len(achados)
 
 
-def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pasta_escudos: Path) -> dict:
+def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pasta_escudos: Path,
+                pasta_rostos: Path) -> dict:
     if not pasta_saves.is_dir():
         raise FileNotFoundError(f"Pasta de saves não encontrada: {pasta_saves} (ajuste VESTIARIO_SAVES)")
     avisos = []
@@ -56,10 +68,11 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pas
             continue
         r.update(gravado, status="ok", carreira=save.nome, clube=save.clube, data_jogo=save.data_jogo.isoformat())
 
-    # ponytail: só procura escudos quando algum save mudou; um escudo novo no patch aparece na próxima mudança de save
-    if any(r.get("status") == "ok" for r in resultados):
+    # ponytail: só olha o patch quando algum save mudou (ou ainda não tem cores ou minifaces);
+    # um escudo, minifaces ou uniforme novo no patch aparece na próxima mudança de save
+    if any(r.get("status") == "ok" for r in resultados) or not banco.tem_cores(con) or not pasta_rostos.is_dir():
         try:
-            extrair_escudos(con, pasta_pes, pasta_escudos)
-        except Exception as e:  # fronteira de confiança: escudos são opcionais
-            avisos.append(f"Escudos indisponíveis ({e}).")
+            extrair_do_patch(con, pasta_pes, pasta_escudos, pasta_rostos)
+        except Exception as e:  # fronteira de confiança: escudos, minifaces e cores são opcionais
+            avisos.append(f"Escudos, minifaces e cores dos times indisponíveis ({e}).")
     return {"avisos": avisos, "arquivos": resultados}

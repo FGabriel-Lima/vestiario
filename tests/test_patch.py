@@ -1,10 +1,13 @@
+import io
 import struct
 import zlib
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
-from vestiario.patch import REG, WESYS, carregar_nomes, ler_arquivos
+from vestiario.patch import (REG, ROSTO, UNICOLOR, WESYS, carregar_nomes, dds_para_png, desembrulhar, ler_arquivos,
+                              ler_cores)
 
 
 def player_bin(jogadores: dict[int, str]) -> bytes:
@@ -69,3 +72,29 @@ def test_escudos_instalados():
     sp, real = "common/render/symbol/flag/e_001255_r.png", "common/render/symbol/flag/e_000109_r.png"
     achados = ler_arquivos(pes, {sp, real})          # São Paulo vem do Sider, Real Madrid do dt15 do jogo
     assert achados[sp][:4] == achados[real][:4] == b"\x89PNG"
+
+
+def test_ler_cores_junta_uniformes_1_e_2_sem_tons_repetidos():
+    entradas = [(0, "191c19", "191c19"), (1, "282828", "ffffff"), (4, "d6d7d6", "d6d7d6"), (8, "ff0000", "ff0000")]
+    reg = struct.pack("<IB", 2454, len(entradas)) + b"".join(
+        bytes([k, 0]) + bytes.fromhex(a) + bytes.fromhex(b) for k, a, b in entradas)
+    reg += bytes(85 - len(reg))
+    assert ler_cores(reg + reg) == {2454: ["#191c19", "#ffffff", "#d6d7d6"]}  # 282828 ≈ 191c19; o terceiro (8) fica fora
+
+
+def test_cores_instaladas():
+    pes = Path(r"D:\Transferpatch")
+    if not pes.exists():
+        pytest.skip(r"Transfer Patch não instalado em D:\Transferpatch")
+    cores = ler_cores(desembrulhar(ler_arquivos(pes, {UNICOLOR})[UNICOLOR]))
+    assert cores[2454] == ["#191c19", "#ffffff", "#d6d7d6"]  # Ceará: preto, branco e cinza
+    assert cores[1248][:2] == ["#ee012e", "#211e1e"]          # Flamengo: vermelho e preto
+
+
+def test_minifaces_instaladas_viram_png():
+    pes = Path(r"D:\Transferpatch")
+    if not pes.exists():
+        pytest.skip(r"Transfer Patch não instalado em D:\Transferpatch")
+    alvo = ROSTO.format(100057)  # DXT5 de 256 px
+    png = dds_para_png(ler_arquivos(pes, {alvo})[alvo])
+    assert png[:4] == b"\x89PNG" and Image.open(io.BytesIO(png)).size == (128, 128)

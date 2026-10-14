@@ -1,3 +1,4 @@
+import io
 import shutil
 import sqlite3
 from datetime import datetime
@@ -5,6 +6,7 @@ from datetime import datetime
 import pytest
 from conftest import SAVES, atuacao, fazer_save, partida
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from vestiario import api, banco, leitor
 
@@ -28,6 +30,12 @@ def test_telas(cliente):
     assert cliente.get("/api/carreiras/1/elenco?ano=2026").json()[0]["gols"] == 2
     assert len(cliente.get("/api/carreiras/1/partidas?ano=2026").json()) == 1
     assert cliente.get("/api/carreiras/1/lendas").json()["artilheiros"][0]["gols"] == 2
+    assert cliente.get("/api/carreiras/1/lendas").json()["recordes"]["goleada"]["id"] == 1
+    assert cliente.get("/api/carreiras/1/partidas/1").json()["escalacao"][0]["gols"] == 2
+    assert cliente.get("/api/carreiras/1/partidas/9").status_code == 404
+    assert cliente.get("/api/carreiras/1/confrontos").json()[0]["vitorias"] == 1
+    assert cliente.get("/api/carreiras/1/transferencias").json()["janelas"] == []
+    assert cliente.get("/api/carreiras/1/mundo?ano=2026").json()["artilheiros"][0]["gols"] == 2
     assert cliente.get("/api/carreiras/9").status_code == 404
 
 
@@ -105,3 +113,28 @@ def test_sincronizar_extrai_so_os_escudos_que_existem(cliente, monkeypatch):
     cliente.post("/api/sincronizar")
     assert sorted(p.name for p in (api.DB.parent / "escudos").iterdir()) == ["7.png"]
     assert cliente.get("/api/escudos/7").content == b"png 7"
+
+
+def test_carreira_traz_as_cores_do_clube(cliente):
+    con = banco.conectar(api.DB)
+    save = fazer_save("2026-03-01", [])
+    save.ids = [2454] + [None] * (len(save.times) - 1)
+    banco.gravar(con, "ML00000000", save, datetime(2026, 10, 14))
+    assert cliente.get("/api/carreiras/1").json()["cores"] == []
+    banco.gravar_cores(con, {2454: ["#191c19", "#ffffff"]})
+    con.close()
+    assert cliente.get("/api/carreiras/1").json()["cores"] == ["#191c19", "#ffffff"]
+
+
+def test_sincronizar_extrai_minifaces_do_elenco(cliente, monkeypatch):
+    rostos = api.PES / "SiderAddons" / "livecpk" / "root" / "common/render/symbol/player"
+    rostos.mkdir(parents=True)
+    Image.new("RGBA", (256, 256), "red").save(rostos / "10.dds")
+    (api.PES / "SiderAddons" / "sider.ini").write_text(r'cpk.root = ".\livecpk\root"' + "\n", encoding="utf8")
+    api.SAVES.mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save(elenco=(10, 11)))
+    cliente.post("/api/sincronizar")
+    r = cliente.get("/api/rostos/10")
+    assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (128, 128)
+    assert cliente.get("/api/rostos/11").status_code == 404

@@ -1,23 +1,28 @@
-"""Lê arquivos do patch na ordem de carregamento do jogo: nomes dos jogadores e escudos."""
+"""Lê arquivos do patch na ordem de carregamento do jogo: nomes dos jogadores, escudos, minifaces e cores dos uniformes."""
+import io
 import re
 import struct
 import zlib
 from pathlib import Path
 
+from PIL import Image
+
 from . import cpk
 
 ALVO = "common/etc/pesdb/Player.bin"
+ROSTO = "common/render/symbol/player/{}.dds"
+UNICOLOR = "common/character0/model/character/uniform/team/UniColor.bin"
 WESYS = bytes.fromhex("ff10815745535953")
 REG, OFF_ID, OFF_NOME = 312, 8, 68
 
 
 def desembrulhar(blob: bytes) -> bytes:
-    if blob[:8] != WESYS:
-        raise ValueError("Player.bin sem cabeçalho WESYS")
+    if blob[1:8] != WESYS[1:]:  # o 1º byte varia: ff no Player.bin, 00 no UniColor.bin
+        raise ValueError("arquivo sem cabeçalho WESYS")
     try:
         return zlib.decompress(blob[16:])
     except zlib.error as e:
-        raise ValueError(f"Player.bin corrompido: {e}") from e
+        raise ValueError(f"arquivo corrompido: {e}") from e
 
 
 def ler_nomes(raw: bytes) -> dict[int, str]:
@@ -26,6 +31,32 @@ def ler_nomes(raw: bytes) -> dict[int, str]:
         pid = struct.unpack_from("<I", raw, o + OFF_ID)[0]
         nomes[pid] = raw[o + OFF_NOME:raw.index(b"\0", o + OFF_NOME)].decode("utf8", "replace")
     return nomes
+
+
+def ler_cores(raw: bytes) -> dict[int, list[str]]:
+    """Cores dos uniformes 1 e 2 de cada time (as da tela de seleção de kits), sem repetir tons parecidos.
+    Registro de 85 bytes: u32 id do time, u8 quantidade, 10 × (kit, flag, RGB, RGB).
+    Kit 0–3 = variações do uniforme 1, 4–7 = uniforme 2, 8 = terceiro, 16 = goleiro."""
+    cores = {}
+    for o in range(0, len(raw) - 84, 85):
+        tid, n = struct.unpack_from("<IB", raw, o)
+        rgbs = []
+        for e in (raw[o + 5 + 8 * i:o + 13 + 8 * i] for i in range(min(n, 10))):
+            if e[0] < 8:
+                for rgb in (e[2:5], e[5:8]):
+                    if all(max(abs(a - b) for a, b in zip(rgb, x)) >= 32 for x in rgbs):
+                        rgbs.append(rgb)
+        cores[tid] = ["#" + rgb.hex() for rgb in rgbs[:3]]
+    return cores
+
+
+def dds_para_png(blob: bytes) -> bytes:
+    """Minifaces vêm em DDS (DXT1, DXT5 ou sem compressão, de 128 a 256 px); o navegador só entende PNG."""
+    img = Image.open(io.BytesIO(blob))
+    img.thumbnail((128, 128))
+    saida = io.BytesIO()
+    img.save(saida, "PNG")
+    return saida.getvalue()
 
 
 def _raizes_sider(pasta_pes: Path) -> list[Path]:

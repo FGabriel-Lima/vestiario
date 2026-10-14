@@ -13,6 +13,10 @@ export const api = {
   elenco: (id, ano) => pedir(`/carreiras/${id}/elenco?ano=${ano}`),
   partidas: (id, ano) => pedir(`/carreiras/${id}/partidas?ano=${ano}`),
   lendas: (id) => pedir(`/carreiras/${id}/lendas`),
+  partida: (id, pid) => pedir(`/carreiras/${id}/partidas/${pid}`),
+  confrontos: (id) => pedir(`/carreiras/${id}/confrontos`),
+  transferencias: (id) => pedir(`/carreiras/${id}/transferencias`),
+  mundo: (id, ano) => pedir(`/carreiras/${id}/mundo?ano=${ano}`),
 };
 
 export const dataBR = (iso) => iso.slice(0, 10).split("-").reverse().join("/");

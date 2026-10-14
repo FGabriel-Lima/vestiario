@@ -5,6 +5,7 @@ import pytest
 from conftest import atuacao, fazer_save, partida
 
 from vestiario import banco
+from vestiario.leitor import MOEDA
 
 AGORA = datetime(2026, 10, 14, 20, 0)
 
@@ -151,3 +152,114 @@ def test_banco_antigo_ganha_coluna_de_escudo_e_relê_os_saves(tmp_path):
     assert "pes_id" in {r[1] for r in con.execute("PRAGMA table_info(time)")}
     assert contar(con, "SELECT count(*) FROM arquivo") == 0
     con.close()
+
+
+def test_rostos_sao_de_quem_passou_pelo_clube(con):
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2026-01-22", 0, 1, (2, 1), [atuacao(10, 0), atuacao(99, 0), atuacao(50, 1)])], elenco=(10, 12)), AGORA)
+    assert banco.rostos(con) == {10, 12, 99}  # 99 jogou e saiu; 50 é do adversário
+
+
+def test_telas_da_parte_1(con):
+    banco.gravar_nomes(con, {10: "Artilheiro", 11: "Garçom", 12: "Reserva", 13: "Novato", 50: "Rival"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-01", [], elenco=(10, 11, 12)), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2026-01-22", 0, 1, (4, 0), [atuacao(10, 0, 3), atuacao(11, 0, 1, 2), atuacao(50, 1)]),
+        partida("2026-02-01", 2, 0, (1, 1), [atuacao(10, 1, 1), atuacao(60, 0, 1)]),
+        partida("2026-02-08", 0, 1, (0, 2), [atuacao(10, 0), atuacao(50, 1, 2)]),
+        partida("2026-02-15", 1, 2, (5, 0), [atuacao(50, 0, 5)]),  # jogo entre outros times
+        partida("2026-05-01", 0, 2),
+    ], elenco=(10, 11, 13)), AGORA)
+
+    s = banco.partida(con, 1, 1)
+    assert (s["mandante"], s["visitante"]) == ("Clube A", "Clube B")
+    assert [(e["nome"], e["lado"], e["gols"]) for e in s["escalacao"]] == [
+        ("Artilheiro", 0, 3), ("Garçom", 0, 1), ("Rival", 1, 0)]
+    assert banco.partida(con, 1, 99) is None
+
+    c = {a["nome"]: (a["jogos"], a["vitorias"], a["empates"], a["derrotas"], len(a["partidas"]))
+         for a in banco.confrontos(con, 1)}
+    assert c == {"Clube B": (2, 1, 0, 1, 2), "Clube C": (1, 0, 1, 0, 1)}
+
+    r = banco.recordes(con, 1)
+    assert r["goleada"]["data"] == "2026-01-22" and r["derrota"]["data"] == "2026-02-08"
+    assert r["vitorias"] == {"jogos": 1, "de": "2026-01-22", "ate": "2026-01-22"}
+    assert r["invencibilidade"] == {"jogos": 2, "de": "2026-01-22", "ate": "2026-02-01"}
+    assert [(h["nome"], h["gols"], h["partida"]["data"]) for h in r["hat_tricks"]] == [("Artilheiro", 3, "2026-01-22")]
+
+    t = banco.transferencias(con, 1)
+    assert t["primeira"] == "2026-01-01"
+    assert [(j["de"], j["ate"]) for j in t["janelas"]] == [("2026-01-01", "2026-03-01")]
+    assert [(p["nome"], p["jogos"]) for p in t["janelas"][0]["chegaram"]] == [("Novato", 0)]
+    assert [(p["nome"], p["jogos"]) for p in t["janelas"][0]["sairam"]] == [("Reserva", 0)]
+
+    m = banco.mundo(con, 1, 2026)
+    assert m["partidas"] == 4
+    assert [(l["nome"], l["gols"], l["time"]) for l in m["artilheiros"]] == [
+        ("Rival", 7, "Clube B"), ("Artilheiro", 4, "Clube A"), ("Garçom", 1, "Clube A"), ("Jogador #60", 1, "Clube C")]
+    assert [l["nome"] for l in m["garcons"]] == ["Garçom"]
+    assert {50, 10} <= banco.rostos(con)
+
+
+def test_transferencias_com_clube_de_origem_e_destino(con):
+    banco.gravar_nomes(con, {12: "Vendido", 13: "Contratado", 14: "Dispensado"})
+    # 13 está no Clube B e no C: vale o de índice mais baixo (os clubes vêm antes das seleções)
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-01", elenco=(10, 12, 14), outros=((13,), (13,))), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-01", elenco=(10, 12, 14), outros=((13,), (13,))), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 13), outros=((), (12,))), AGORA)
+    assert contar(con, "SELECT count(DISTINCT sincronizacao_id) FROM vinculo") == 2  # uma por data do jogo
+    j = banco.transferencias(con, 1)["janelas"][0]
+    assert (j["origem_conhecida"], j["destino_conhecido"]) == (True, True)
+    assert [(p["nome"], p["clube"]["nome"]) for p in j["chegaram"]] == [("Contratado", "Clube B")]
+    assert {p["nome"]: p["clube"] and p["clube"]["nome"] for p in j["sairam"]} == {"Vendido": "Clube C",
+                                                                                   "Dispensado": None}
+
+
+def test_transferencias_de_snapshot_sem_vinculo(con):
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-01", elenco=(10, 12)), AGORA)
+    con.execute("DELETE FROM vinculo")  # sincronização feita antes desta versão
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 13), outros=((12,), ())), AGORA)
+    j = banco.transferencias(con, 1)["janelas"][0]
+    assert (j["origem_conhecida"], j["destino_conhecido"]) == (False, True)
+    assert j["chegaram"][0]["clube"] is None and j["sairam"][0]["clube"]["nome"] == "Clube B"
+
+
+def test_banco_sem_vinculo_rele_os_saves(tmp_path):
+    caminho = tmp_path / "v.db"
+    banco.conectar(caminho).close()
+    antigo = sqlite3.connect(caminho)
+    antigo.executescript("DROP TABLE vinculo; INSERT INTO arquivo VALUES('x/ML00000000', 1, 1.0);")
+    antigo.close()
+    con = banco.conectar(caminho)
+    assert contar(con, "SELECT count(*) FROM arquivo") == 0
+    con.close()
+
+
+def test_valores_das_transferencias(con):
+    banco.gravar_nomes(con, {12: "Vendido", 13: "Contratado", 20: "Antigo"})
+    # o livro do save já traz uma venda de antes da primeira sincronização
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-01", elenco=(10, 12), negocios=[(20, 1000, 5)],
+                                               outros=((20,), ())), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 13), outros=((), (12,)),
+                                               negocios=[(20, 1000, 5), (13, -500, 8), (12, 300, 5)]), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 13), outros=((), (12,)),
+                                               negocios=[(20, 1000, 5), (13, -500, 8), (12, 300, 5)]), AGORA)
+    assert contar(con, "SELECT count(*) FROM negocio") == 3
+    recente, primeira = banco.transferencias(con, 1)["janelas"]
+    assert (recente["gastos"], recente["receitas"]) == (500 * MOEDA, 300 * MOEDA)
+    assert [(p["nome"], p["valor"], p["tipo"]) for p in recente["chegaram"]] == [("Contratado", -500 * MOEDA, 8)]
+    assert [(p["nome"], p["valor"]) for p in recente["sairam"]] == [("Vendido", 300 * MOEDA)]
+    assert (primeira["de"], primeira["ate"], primeira["chegaram"]) == (None, "2026-01-01", [])
+    assert [(p["nome"], p["valor"], p["clube"]["nome"]) for p in primeira["sairam"]] == [("Antigo", 1000 * MOEDA, "Clube B")]
+
+
+def test_contratos_no_elenco_e_fim_de_contrato_nas_transferencias(con):
+    banco.gravar_nomes(con, {10: "Titular", 12: "Vencido", 13: "Vendido"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-01", elenco=(10, 12, 13), contratos={
+        10: (17967, 60458, "2027-01-31"), 12: (5200, 0, "2026-01-31"), 13: (5200, 100, "2029-01-31")}), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [partida("2026-02-01", 0, 1, (1, 0), [atuacao(10, 0, 1)])],
+                                               elenco=(10,), contratos={10: (17967, 60458, "2027-01-31")}), AGORA)
+    titular = banco.elenco(con, 1, 2026)[0]
+    assert titular["contrato"] == {"salario_semanal": 345 * MOEDA, "multa": 60458 * MOEDA, "fim": "2027-01-31"}
+    sairam = {p["nome"]: p["fim_de_contrato"] for p in banco.transferencias(con, 1)["janelas"][0]["sairam"]}
+    assert sairam == {"Vencido": True, "Vendido": False}
