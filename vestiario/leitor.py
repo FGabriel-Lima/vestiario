@@ -1,4 +1,4 @@
-"""Lê um save da Master League do PES 2021 + SP Football Life 2026. Tudo na memória."""
+"""Lê um save da Master League do PES 2021 (Football Life 2026 / Transfer Patch). Tudo na memória."""
 import struct
 from dataclasses import dataclass
 from datetime import date

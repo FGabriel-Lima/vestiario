@@ -12,7 +12,7 @@ from .sincronizar import sincronizar
 
 _casa = Path.home()
 SAVES = Path(os.environ.get("VESTIARIO_SAVES", _casa / "Documents/KONAMI/eFootball PES 2021 SEASON UPDATE/2026/save"))
-PES = Path(os.environ.get("VESTIARIO_PES", r"C:\Program Files (x86)\SP Football Life 2026"))
+PES = Path(os.environ.get("VESTIARIO_PES", r"D:\Transferpatch"))
 DB = Path(os.environ.get("VESTIARIO_DB", Path(os.environ.get("LOCALAPPDATA", _casa)) / "Vestiario/vestiario.db"))
 WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 

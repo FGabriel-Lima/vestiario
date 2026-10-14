@@ -38,9 +38,9 @@ def test_sem_player_bin(tmp_path):
 
 
 def test_patch_instalado():
-    pes = Path(r"C:\Program Files (x86)\SP Football Life 2026")
+    pes = Path(r"D:\Transferpatch")
     if not pes.exists():
-        pytest.skip("SP Football Life 2026 não instalado")
+        pytest.skip(r"Transfer Patch não instalado em D:\Transferpatch")
     assert carregar_nomes(pes)[60657] == "Jonathan Calleri"
 
 
