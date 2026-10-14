@@ -1,0 +1,19 @@
+# Saves e arquivos extraídos do jogo: dados pessoais e conteúdo da Konami/patch
+saves/
+out/
+db/
+ML0*
+EDIT0*
+SYSTEM0*
+*.dat
+*.raw
+*.bin
+*.cpk
+
+__pycache__/
+node_modules/
+.env
+
+# Documentação de planejamento: fica só local
+docs/
+CLAUDE.md
