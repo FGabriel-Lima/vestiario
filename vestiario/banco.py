@@ -93,9 +93,14 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
                 novas += 1
             pid = con.execute(
                 "INSERT INTO partida(carreira_id, data, mandante_idx, visitante_idx, gols_mandante, gols_visitante,"
-                " penaltis_mandante, penaltis_visitante, disputada) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                " penaltis_mandante, penaltis_visitante, disputada) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(carreira_id, data, mandante_idx, visitante_idx) DO UPDATE SET"
+                " gols_mandante = excluded.gols_mandante, gols_visitante = excluded.gols_visitante,"
+                " penaltis_mandante = excluded.penaltis_mandante, penaltis_visitante = excluded.penaltis_visitante,"
+                " disputada = excluded.disputada RETURNING id",
                 (cid, *chave, *p.gols, *p.penaltis, int(p.disputada)),
             ).fetchone()[0]
+            con.execute("DELETE FROM escalacao WHERE partida_id = ?", (pid,))
             con.executemany("INSERT INTO escalacao VALUES(?, ?, ?, ?, ?)",
                             [(pid, a.player_id, a.lado, a.gols, a.assistencias) for a in p.escalacao])
         return {"carreira_id": cid, "novas": novas, "atualizadas": atualizadas}

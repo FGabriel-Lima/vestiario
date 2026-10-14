@@ -69,3 +69,12 @@ def test_arquivo_visto(con):
     banco.marcar_arquivo(con, "x/ML00000000", 10, 1.5)
     assert banco.arquivo_visto(con, "x/ML00000000", 10, 1.5)
     assert not banco.arquivo_visto(con, "x/ML00000000", 10, 2.0)
+
+
+def test_save_antigo_com_jogo_que_o_banco_tem_como_futuro(con):
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [partida("2026-03-05", 0, 1)]), AGORA)
+    r = banco.gravar(con, "ML00000000",
+                     fazer_save("2026-02-01", [partida("2026-03-05", 0, 1, (1, 0), [atuacao(10, 0, 1)])]), AGORA)
+    assert r["atualizadas"] == 1
+    assert [tuple(x) for x in con.execute("SELECT gols_mandante, disputada FROM partida")] == [(1, 1)]
+    assert contar(con, "SELECT count(*) FROM escalacao") == 1
