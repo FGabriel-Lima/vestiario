@@ -3,7 +3,26 @@ import { api, dataBR } from "./api.js";
 import Escudo from "./Escudo.jsx";
 import Rosto from "./Rosto.jsx";
 
-const ABAS = ["Visão geral", "Feed", "Conversas", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
+// As dez seções em quatro grupos: o clube por dentro, os jogos, o que se fala dele e a história
+const GRUPOS = [
+  { nome: "Clube", icone: "shield", abas: ["Visão geral", "Elenco", "Transferências"] },
+  { nome: "Jogos", icone: "sports_soccer", abas: ["Partidas", "Campeonatos", "Adversários"] },
+  { nome: "Bastidores", icone: "forum", abas: ["Feed", "Conversas"] },
+  { nome: "História", icone: "emoji_events", abas: ["Lendas", "Pelo mundo"] },
+];
+const ABAS = GRUPOS.flatMap((g) => g.abas);
+const SOBRE = {
+  "Visão geral": "A campanha da temporada, o caixa e os próximos jogos.",
+  Elenco: "Números, valor e contrato de cada jogador. O balão chama o jogador pra conversa.",
+  Transferências: "Propostas recebidas e quem chegou e saiu em cada janela.",
+  Partidas: "Os jogos da temporada. Um jogo disputado abre a súmula.",
+  Campeonatos: "Classificação e chave de cada competição.",
+  Adversários: "Retrospecto contra cada time, na carreira inteira.",
+  Feed: "O que o clube, a imprensa e o mercado postaram a cada sincronização.",
+  Conversas: "O auxiliar técnico e os jogadores do elenco.",
+  Lendas: "Títulos, recordes e os maiores do clube.",
+  "Pelo mundo": "Artilheiros, garçons e campeões do resto do mundo.",
+};
 // Abas que olham a carreira inteira e não usam o seletor de temporada
 // (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
 const DA_CARREIRA = new Set(["Feed", "Conversas", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
@@ -69,81 +88,131 @@ export default function Carreira({ id, onVoltar }) {
       .catch((e) => setErro(e.message));
   }, [id]);
 
-  const voltar = (
-    <button onClick={onVoltar} className="mb-6 text-muted hover:text-chalk">
-      <span className="icone">arrow_back</span> Carreiras
+  if (erro) {
+    return (
+      <>
+        <button onClick={onVoltar} className="mb-6 text-muted hover:text-chalk">
+          <span className="icone">arrow_back</span> Carreiras
+        </button>
+        <Erro mensagem={erro} />
+      </>
+    );
+  }
+  if (!carreira) return <p className="text-muted">Abrindo o vestiário…</p>;
+
+  const grupo = GRUPOS.find((g) => g.abas.includes(aba));
+  const usaAno = !DA_CARREIRA.has(aba) && ano !== null;
+  // a aba aberta leva o rótulo de fita crepe, como o nome no armário; as outras ficam a giz
+  const item = (a, extra = "") => (
+    <button
+      key={a}
+      onClick={() => setAba(a)}
+      aria-current={a === aba ? "page" : undefined}
+      className={`whitespace-nowrap ${extra} ${
+        a === aba ? "fita text-base" : "px-3 py-1 font-kit text-lg font-semibold uppercase tracking-wide text-muted hover:text-chalk"
+      }`}
+    >
+      {a}
     </button>
   );
 
-  if (erro) return (<>{voltar}<Erro mensagem={erro} /></>);
-  if (!carreira) return <p className="text-muted">Abrindo o vestiário…</p>;
-
   return (
-    <div style={estiloDoClube(carreira.cores)}>
-      {voltar}
-      {carreira.cores?.length > 0 && <div aria-hidden="true" className="cachecol mb-8" />}
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-6">
-        <div className="flex items-end gap-5">
-          <Escudo id={carreira.escudo} nome={carreira.clube_nome} className="size-20 drop-shadow-lg sm:size-28" />
-          <div>
-            <span className="fita text-lg">No jogo: {dataBR(carreira.data_jogo)}</span>
-            <h1 className="mt-3 font-kit text-6xl font-extrabold uppercase leading-none tracking-tight sm:text-8xl">
-              {carreira.clube_nome}
-            </h1>
+    <div style={estiloDoClube(carreira.cores)} className="pb-24 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-12 lg:pb-0">
+      <aside className="lg:sticky lg:top-8 lg:self-start">
+        <button onClick={onVoltar} className="mb-5 text-sm text-muted hover:text-chalk">
+          <span className="icone">arrow_back</span> Carreiras
+        </button>
+        {carreira.cores?.length > 0 && <div aria-hidden="true" className="cachecol mb-6" />}
+        <div className="flex items-center gap-4 lg:flex-col lg:items-start lg:gap-3">
+          <Escudo id={carreira.escudo} nome={carreira.clube_nome} className="size-14 shrink-0 drop-shadow-lg lg:size-20" />
+          <div className="min-w-0">
+            <p className="font-kit text-3xl font-extrabold uppercase leading-none tracking-tight lg:text-4xl">{carreira.clube_nome}</p>
+            <p className="mt-1 font-kit text-sm uppercase tracking-[0.15em] text-muted">No jogo: {dataBR(carreira.data_jogo)}</p>
           </div>
         </div>
-        {!DA_CARREIRA.has(aba) && ano !== null && (
-          <select
-            aria-label="Temporada"
-            value={ano}
-            onChange={(e) => setAno(Number(e.target.value))}
-            className="rounded-md border border-pitch-700 bg-pitch-800 px-3 py-2 font-kit text-lg uppercase"
-          >
-            {carreira.temporadas.map((t) => (
-              <option key={t} value={t}>
-                Temporada {t}
-              </option>
-            ))}
-          </select>
-        )}
-      </header>
+        <nav aria-label="Seções da carreira" className="mt-8 hidden space-y-6 lg:block">
+          {GRUPOS.map((g) => (
+            <div key={g.nome}>
+              <p className="mb-1.5 flex items-center gap-2 font-kit text-xs uppercase tracking-[0.25em] text-muted/70">
+                <span aria-hidden="true" className="icone text-base">{g.icone}</span>
+                {g.nome}
+              </p>
+              <ul className="space-y-1">
+                {g.abas.map((a) => (
+                  <li key={a}>{item(a, "-ml-0.5 text-left")}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+      </aside>
 
-      <nav role="tablist" aria-label="Seções da carreira" className="mb-8 flex gap-1 overflow-x-auto shadow-[inset_0_-1px_0_var(--color-pitch-700)]">
-        {ABAS.map((a) => (
+      <div className="min-w-0">
+        <nav aria-label={`Seções de ${grupo.nome}`} className="-mx-1 mt-6 flex items-center gap-2 overflow-x-auto px-1 py-1 lg:hidden">
+          {grupo.abas.map((a) => item(a))}
+        </nav>
+        <header className="mb-8 mt-6 flex flex-wrap items-end justify-between gap-4 border-b border-pitch-800 pb-5 lg:mt-12">
+          <div>
+            <h1 className="font-kit text-4xl font-extrabold uppercase leading-none sm:text-5xl">{aba}</h1>
+            <p className="mt-2 text-sm text-muted">{SOBRE[aba]}</p>
+          </div>
+          {usaAno && (
+            <select
+              aria-label="Temporada"
+              value={ano}
+              onChange={(e) => setAno(Number(e.target.value))}
+              className="rounded-md border border-pitch-700 bg-pitch-800 px-3 py-2 font-kit text-lg uppercase"
+            >
+              {carreira.temporadas.map((t) => (
+                <option key={t} value={t}>
+                  Temporada {t}
+                </option>
+              ))}
+            </select>
+          )}
+        </header>
+
+        <div>
+          {ano === null && !DA_CARREIRA.has(aba) ? (
+            <p className="text-muted">Nenhuma partida do clube registrada ainda. Jogue uma partida, salve e sincronize.</p>
+          ) : (
+            <>
+              {aba === "Visão geral" && (
+                <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
+              )}
+              {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} />}
+              {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
+              {aba === "Feed" && <Feed id={id} />}
+              {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} />}
+              {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
+              {aba === "Transferências" && <Transferencias id={id} />}
+              {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
+              {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
+              {aba === "Pelo mundo" && <PeloMundo id={id} ano={ano} clube={carreira.clube_idx} />}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* celular: os quatro grupos numa barra embaixo, ao alcance do polegar; as abas do grupo ficam no topo */}
+      <nav
+        aria-label="Grupos de seções"
+        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-pitch-700 bg-pitch-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+      >
+        {GRUPOS.map((g) => (
           <button
-            key={a}
-            role="tab"
-            aria-selected={a === aba}
-            onClick={() => setAba(a)}
-            className={`whitespace-nowrap border-b-2 px-4 py-2 font-kit text-xl font-semibold uppercase tracking-wide ${
-              a === aba ? "border-destaque text-chalk" : "border-transparent text-muted hover:text-chalk"
+            key={g.nome}
+            onClick={() => g !== grupo && setAba(g.abas[0])}
+            aria-current={g === grupo ? "true" : undefined}
+            className={`flex flex-col items-center gap-0.5 py-2 font-kit text-sm font-semibold uppercase tracking-wide ${
+              g === grupo ? "text-destaque" : "text-muted"
             }`}
           >
-            {a}
+            <span aria-hidden="true" className="icone text-2xl">{g.icone}</span>
+            {g.nome}
           </button>
         ))}
       </nav>
-
-      <div role="tabpanel" aria-label={aba}>
-        {ano === null && !DA_CARREIRA.has(aba) ? (
-          <p className="text-muted">Nenhuma partida do clube registrada ainda. Jogue uma partida, salve e sincronize.</p>
-        ) : (
-          <>
-            {aba === "Visão geral" && (
-              <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
-            )}
-            {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} />}
-            {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
-            {aba === "Feed" && <Feed id={id} />}
-            {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} />}
-            {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
-            {aba === "Transferências" && <Transferencias id={id} />}
-            {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
-            {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
-            {aba === "Pelo mundo" && <PeloMundo id={id} ano={ano} clube={carreira.clube_idx} />}
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -204,7 +273,7 @@ function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
           </p>
           <p className="mt-1 text-muted">dos pontos em {r.jogos} jogos</p>
         </div>
-        <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-md bg-pitch-700 sm:grid-cols-5">
+        <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-md bg-pitch-700 sm:grid-cols-6">
           {campanha.map(([k, rotulo, valor]) => (
             <div key={k} className="bg-pitch-900 px-4 py-3">
               <dt className="text-xs uppercase text-muted">{rotulo}</dt>
@@ -218,6 +287,10 @@ function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
           <div className="bg-pitch-900 px-4 py-3">
             <dt className="text-xs uppercase text-muted">Gols contra</dt>
             <dd className="font-kit text-4xl font-bold">{r.gols_contra}</dd>
+          </div>
+          <div className="bg-pitch-900 px-4 py-3">
+            <dt className="text-xs uppercase text-muted">Saldo</dt>
+            <dd className="font-kit text-4xl font-bold">{r.gols_pro - r.gols_contra > 0 ? "+" : ""}{r.gols_pro - r.gols_contra}</dd>
           </div>
         </dl>
       </section>
@@ -244,6 +317,19 @@ function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
         </ol>
       </div>
       <ListaPartidas id={id} partidas={r.ultimas} clube={clube} />
+      <ProximosJogos id={id} ano={ano} clube={clube} />
+    </>
+  );
+}
+
+function ProximosJogos({ id, ano, clube }) {
+  const { dados: ps } = useDados(() => api.partidas(id, ano), [id, ano]);
+  const proximas = (ps ?? []).filter((p) => !p.disputada).slice(0, 3);
+  if (proximas.length === 0) return null;
+  return (
+    <>
+      <h2 className="mb-3 mt-10 font-kit text-2xl font-semibold uppercase">Próximos jogos</h2>
+      <ListaPartidas id={id} partidas={proximas} clube={clube} />
     </>
   );
 }
@@ -429,8 +515,24 @@ function Partidas({ id, ano, clube }) {
       {futuras.length > 0 && (
         <>
           <h2 className="mb-3 mt-10 font-kit text-2xl font-semibold uppercase text-muted">Próximas</h2>
-          <ListaPartidas id={id} partidas={futuras} clube={clube} />
+          <Proximas id={id} partidas={futuras} clube={clube} />
         </>
+      )}
+    </>
+  );
+}
+
+// Jogos que ainda vão acontecer: os próximos à vista, o resto da tabela atrás de um botão.
+function Proximas({ id, partidas, clube, mostrar = 5 }) {
+  const [todas, setTodas] = useState(false);
+  return (
+    <>
+      <ListaPartidas id={id} partidas={todas ? partidas : partidas.slice(0, mostrar)} clube={clube} />
+      {partidas.length > mostrar && (
+        <button onClick={() => setTodas(!todas)} className="mt-3 flex items-center gap-1 text-sm font-semibold text-destaque hover:underline">
+          <span aria-hidden="true" className="icone">{todas ? "expand_less" : "expand_more"}</span>
+          {todas ? "Mostrar só os próximos" : `Mostrar os ${partidas.length} jogos`}
+        </button>
       )}
     </>
   );
@@ -685,7 +787,12 @@ function Edicao({ id, chave, clube, dataJogo }) {
       {temTabela && e.partidas_clube.length > 0 && (
         <section>
           <h3 className="mb-3 font-kit text-2xl font-semibold uppercase">Seus jogos</h3>
-          <ListaPartidas id={id} partidas={e.partidas_clube} clube={clube} />
+          {e.partidas_clube.some((p) => p.disputada) && (
+            <ListaPartidas id={id} partidas={e.partidas_clube.filter((p) => p.disputada)} clube={clube} />
+          )}
+          <div className="mt-2">
+            <Proximas id={id} partidas={e.partidas_clube.filter((p) => !p.disputada)} clube={clube} mostrar={3} />
+          </div>
         </section>
       )}
     </>

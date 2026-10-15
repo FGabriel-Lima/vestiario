@@ -106,7 +106,7 @@ body {
 .cachecol {
   --franja: 1.1rem;
   position: relative;
-  height: 2.1rem;
+  height: 1.4rem;
   margin-inline: var(--franja);
   background:
     repeating-linear-gradient(90deg, rgb(0 0 0 / 0.14) 0 1px, transparent 1px 4px), /* malha do tricô */
