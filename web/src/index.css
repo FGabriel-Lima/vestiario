@@ -43,6 +43,11 @@ body {
   font-size: 1.25rem;
   line-height: 1;
   vertical-align: middle;
+  /* enquanto a fonte não chega, o nome do ícone ("arrow_back") não vaza como texto */
+  display: inline-block;
+  width: 1em;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 /* Assinatura: rótulo de fita crepe escrito a pincel atômico, como nos armários */

@@ -119,11 +119,14 @@ export default function Carreira({ id, onVoltar }) {
   return (
     <div style={estiloDoClube(carreira.cores)} className="pb-24 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-12 lg:pb-0">
       <aside className="lg:sticky lg:top-10 lg:-ml-2 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto lg:overscroll-contain lg:pl-2 lg:pr-2 lg:[scrollbar-width:thin]">
-        <button onClick={onVoltar} className="mb-5 text-sm text-muted hover:text-chalk">
+        <button onClick={onVoltar} className="mb-5 hidden text-sm text-muted hover:text-chalk lg:block">
           <span className="icone">arrow_back</span> Carreiras
         </button>
-        {carreira.cores?.length > 0 && <div aria-hidden="true" className="cachecol mb-6" />}
-        <div className="flex items-center gap-4 lg:flex-col lg:items-start lg:gap-3">
+        {carreira.cores?.length > 0 && <div aria-hidden="true" className="cachecol mb-6 hidden lg:block" />}
+        <div className="flex items-center gap-3 lg:flex-col lg:items-start lg:gap-3">
+          <button onClick={onVoltar} aria-label="Voltar às carreiras" className="-ml-2 grid size-9 shrink-0 place-items-center rounded-full text-muted hover:bg-pitch-800 hover:text-chalk lg:hidden">
+            <span aria-hidden="true" className="icone text-2xl">arrow_back</span>
+          </button>
           <Escudo id={carreira.escudo} nome={carreira.clube_nome} className="size-14 shrink-0 drop-shadow-lg lg:size-20" />
           <div className="min-w-0">
             <p className="font-kit text-3xl font-extrabold uppercase leading-none tracking-tight lg:text-4xl">{carreira.clube_nome}</p>
@@ -148,10 +151,26 @@ export default function Carreira({ id, onVoltar }) {
       </aside>
 
       <div className="min-w-0">
-        <nav aria-label={`Seções de ${grupo.nome}`} className="-mx-1 mt-6 flex items-center gap-2 overflow-x-auto px-1 py-1 lg:hidden">
-          {grupo.abas.map((a) => item(a))}
+        {/* no celular as abas do grupo dividem a largura; o rótulo de fita crepe não caberia em três */}
+        <nav
+          aria-label={`Seções de ${grupo.nome}`}
+          className="mt-5 grid border-b border-pitch-800 lg:hidden"
+          style={{ gridTemplateColumns: `repeat(${grupo.abas.length}, minmax(0, 1fr))` }}
+        >
+          {grupo.abas.map((a) => (
+            <button
+              key={a}
+              onClick={() => setAba(a)}
+              aria-current={a === aba ? "page" : undefined}
+              className={`-mb-px truncate border-b-2 px-1 pb-2 pt-1 font-kit text-base font-semibold uppercase ${
+                a === aba ? "border-destaque text-chalk" : "border-transparent text-muted"
+              }`}
+            >
+              {a}
+            </button>
+          ))}
         </nav>
-        <header className="mb-8 mt-6 flex flex-wrap items-end justify-between gap-4 border-b border-pitch-800 pb-5 lg:mt-12">
+        <header className="mb-8 mt-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 border-b border-pitch-800 pb-5 lg:mt-12">
           <div>
             <h1 className="font-kit text-4xl font-extrabold uppercase leading-none sm:text-5xl">{aba}</h1>
             <p className="mt-2 text-sm text-muted">{SOBRE[aba]}</p>
@@ -199,6 +218,14 @@ export default function Carreira({ id, onVoltar }) {
         aria-label="Grupos de seções"
         className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-pitch-700 bg-pitch-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
       >
+        {/* no celular o cachecol vira a borda da barra, nas cores do uniforme */}
+        {carreira.cores?.length > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute inset-x-0 -top-px h-[3px]"
+            style={{ background: "repeating-linear-gradient(90deg, var(--time-1) 0 3rem, var(--time-2) 3rem 4rem)" }}
+          />
+        )}
         {GRUPOS.map((g) => (
           <button
             key={g.nome}
@@ -2209,11 +2236,12 @@ function Lendas({ id, clube }) {
   const { dados: l, erro } = useDados(() => api.lendas(id), [id]);
   if (erro) return <Erro mensagem={erro} />;
   if (!l) return null;
+  // quem tem zero não entra no ranking
   const rankings = [
     ["Artilheiros", "gols", "gols", l.artilheiros],
     ["Garçons", "assistencias", "assistências", l.garcons],
     ["Mais jogos", "jogos", "jogos", l.mais_jogos],
-  ];
+  ].map(([titulo, campo, unidade, lista]) => [titulo, campo, unidade, lista.filter((j) => j[campo] > 0)]);
   return (
     <>
       <SalaDeTrofeus id={id} clube={clube} />
@@ -2320,8 +2348,8 @@ function PeloMundo({ id, ano, clube }) {
   if (!m) return null;
   return (
     <>
-      <p className="mb-8 max-w-2xl text-muted">
-        As {m.partidas.toLocaleString("pt-BR")} partidas do mundo em {ano} que o Vestiário guardou, com todas as
+      <p className="mb-8 max-w-2xl text-sm text-muted">
+        Somando as {m.partidas.toLocaleString("pt-BR")} partidas do mundo em {ano} que o Vestiário guardou, com todas as
         competições somadas. O time é o do último jogo de cada jogador.
       </p>
       <div className="grid grid-cols-1 gap-10 md:grid-cols-2">
