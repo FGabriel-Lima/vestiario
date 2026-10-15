@@ -60,6 +60,18 @@ def test_parecer_da_proposta(cliente, monkeypatch):
     assert r.status_code == 503 and "Gemini" in r.json()["detail"]
 
 
+def test_jornal(cliente, monkeypatch):
+    con = banco.conectar(api.DB)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [partida("2026-02-01", 0, 1, (2, 0), [atuacao(10, 0, 2)])]),
+                 datetime(2026, 10, 15))
+    con.close()
+    assert cliente.get("/api/carreiras/1/jornal").json() == {"atual": "2026-03-01", "rodada": False, "edicoes": []}
+    monkeypatch.setattr(ia, "responder", lambda *a: {"manchete": "Vitória", "linha_fina": "2 a 0",
+                                                     "materias": [{"titulo": "Placar", "texto": "Venceu."}]})
+    assert cliente.post("/api/carreiras/1/jornal").json()["conteudo"]["manchete"] == "Vitória"
+    assert cliente.get("/api/carreiras/1/jornal").json()["rodada"] is True
+
+
 def test_pasta_de_saves_inexistente(cliente):
     r = cliente.post("/api/sincronizar")
     assert r.status_code == 404 and "VESTIARIO_SAVES" in r.json()["detail"]

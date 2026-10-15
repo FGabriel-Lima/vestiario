@@ -208,6 +208,25 @@ body {
   rotate: 0.4deg;
 }
 
+/* Jornal: a capa impressa colada na parede; o cabeçalho sai nas cores do clube (camisa e número) */
+.jornal {
+  position: relative;
+  color: var(--color-pincel);
+  background: linear-gradient(175deg, var(--color-papel), color-mix(in srgb, var(--color-papel), #b9a77a 20%));
+  box-shadow: 0 2rem 3rem -1.5rem rgb(0 0 0 / 0.85);
+  rotate: -0.4deg;
+}
+.jornal-cabecalho {
+  padding: 1.25rem 1.25rem 0.75rem;
+  background: var(--color-camisa);
+  color: var(--color-numero);
+}
+@media (min-width: 640px) {
+  .jornal-cabecalho {
+    padding: 1.5rem 2.25rem 0.9rem;
+  }
+}
+
 /* Súmula: folha de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
 .sumula {
   width: min(100% - 2rem, 46rem);

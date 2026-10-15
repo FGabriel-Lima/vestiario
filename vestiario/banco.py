@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS parecer(
   carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, clube_idx INTEGER NOT NULL,
   valor INTEGER NOT NULL, texto TEXT NOT NULL, recomendacao TEXT NOT NULL, fatos TEXT NOT NULL, em TEXT NOT NULL,
   PRIMARY KEY(carreira_id, player_id, clube_idx, valor));
+-- edições do jornal, uma por data do jogo sincronizada; fatos = o JSON exato que a IA recebeu
+CREATE TABLE IF NOT EXISTS jornal(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, data_jogo TEXT NOT NULL, de TEXT, conteudo TEXT NOT NULL,
+  fatos TEXT NOT NULL, em TEXT NOT NULL, PRIMARY KEY(carreira_id, data_jogo));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
@@ -903,3 +907,99 @@ def titulos(con: sqlite3.Connection, cid: int) -> list[dict]:
             lista.append({"chave": chave, "nome": m["nome"], "temporada": m["temporada"], "fim": fim,
                           "campeao": m["campeao"], "vice": m["vice"]})
     return sorted(lista, key=lambda t: (t["fim"], t["nome"]), reverse=True)
+
+
+# --- jornal --------------------------------------------------------------------
+
+def fatos_da_edicao(con: sqlite3.Connection, cid: int) -> dict:
+    """O que aconteceu com o clube entre a sincronização anterior (outra data do jogo) e a mais recente, só com o que
+    está no banco. Listas vazias ficam de fora, para a IA não ter do que inventar."""
+    s = _ultima(con, cid)
+    clube, ate = s["clube_idx"], s["data_jogo"]
+    anterior = con.execute("SELECT max(data_jogo) FROM sincronizacao WHERE carreira_id = ? AND data_jogo < ?",
+                           (cid, ate)).fetchone()[0]
+    de = anterior
+    todas = partidas(con, cid)
+
+    def gols_do_clube(pid):
+        lado = None
+        linhas = []
+        for r in con.execute("SELECT coalesce(j.nome, 'Jogador #' || e.player_id) AS nome, e.gols, e.lado, p.mandante_idx "
+                             "FROM escalacao e JOIN partida p ON p.id = e.partida_id LEFT JOIN jogador j "
+                             "ON j.player_id = e.player_id WHERE e.partida_id = ? AND e.gols > 0 ORDER BY e.gols DESC, j.nome",
+                             (pid,)):
+            lado = 0 if r["mandante_idx"] == clube else 1
+            if r["lado"] == lado:
+                linhas.append(r["nome"] + (f" ({r['gols']})" if r["gols"] > 1 else ""))
+        return linhas
+
+    resultados = []
+    for p in todas:
+        if p["disputada"] and (de is None or p["data"] > de) and p["data"] <= ate:
+            pro, contra = _placar(p, clube)
+            jogo = {"data": p["data"], "competicao": p["competicao"],
+                    "placar": f"{p['mandante']} {p['gols_mandante']} x {p['gols_visitante']} {p['visitante']}",
+                    "resultado": "vitória" if pro > contra else "derrota" if pro < contra else "empate",
+                    "em_casa": p["mandante_idx"] == clube}
+            if p["penaltis_mandante"] + p["penaltis_visitante"]:
+                jogo["penaltis"] = f"{p['penaltis_mandante']} x {p['penaltis_visitante']}"
+            if g := gols_do_clube(p["id"]):
+                jogo["gols_do_clube"] = g
+            resultados.append(jogo)
+    if de is None:
+        resultados = resultados[-5:]  # primeira edição: só os últimos jogos
+
+    classificacao = []
+    da_temporada = lambda t: t.startswith(ate[:4]) or t.endswith("/" + ate[2:4])  # "2026" ou "2025/26"
+    for e in edicoes(con, cid):
+        if not (e["do_clube"] and e["liga"] and da_temporada(e["temporada"])):
+            continue
+        fase = edicao(con, cid, e["chave"])["fases"][0]
+        linhas = fase["grupos"][0]["linhas"]
+        nossa = next((l for l in linhas if l["idx"] == clube), None)
+        if nossa and nossa["jogos"]:
+            classificacao.append({"competicao": e["nome"], "posicao": nossa["posicao"], "pontos": nossa["pontos"],
+                                  "jogos": nossa["jogos"], "rodadas_jogadas": fase["rodadas_jogadas"],
+                                  "rodadas_total": fase["rodadas_total"], "lider": linhas[0]["nome"]})
+
+    janela = next((j for j in transferencias(con, cid)["janelas"] if j["ate"] == ate and j["de"] == de), None)
+    mov = lambda lista, chave: [{"nome": x["nome"], chave: x["clube"]["nome"] if x["clube"] else None,
+                                 **({"valor": abs(x["valor"])} if x["valor"] else {})} for x in lista]
+    propostas_novas = [{"clube_interessado": x["clube"]["nome"], "jogador": x["nome"], "valor": x["valor"]}
+                       for x in propostas(con, cid) if de is None or x["primeira"] > de]
+    limite = date.fromisoformat(ate).replace(day=1)
+    limite = date(limite.year + (limite.month + 5) // 12, (limite.month + 5) % 12 + 1, 28).isoformat()
+    nomes = {r[0]: r[1] for r in con.execute("SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) FROM elenco e "
+                                             "LEFT JOIN jogador j USING(player_id) WHERE e.sincronizacao_id = ?", (s["id"],))}
+    vencendo = sorted(({"nome": nomes[pid], "fim": c["fim"]} for pid, c in _contratos(con, s["id"]).items()
+                       if pid in nomes and not c["emprestimo"] and c["fim"] <= limite), key=lambda x: (x["fim"], x["nome"]))
+    proximos = [{"data": p["data"], "jogo": f"{p['mandante']} x {p['visitante']}", "competicao": p["competicao"]}
+                for p in todas if not p["disputada"] and p["data"] > ate][:3]
+    artilheiros = [{"nome": r["nome"], "gols": r["gols"]} for r in con.execute(
+        _ESTATS + "AND substr(p.data, 1, 4) = :ano GROUP BY e.player_id HAVING sum(e.gols) > 0 ORDER BY 5 DESC, 2 LIMIT 3",
+        {"cid": cid, "clube": clube, "ano": ate[:4]})]
+    titulos_clube = [{"competicao": t["nome"], "temporada": t["temporada"],
+                      "resultado": "campeão" if t["campeao"]["idx"] == clube else "vice"}
+                     for t in titulos(con, cid) if (de is None or t["fim"] > de) and t["fim"] <= ate
+                     and clube in (t["campeao"]["idx"], t["vice"]["idx"])]
+
+    fatos = {"edicao": {"clube": s["clube_nome"], "de": de, "ate": ate},
+             "resultados": resultados, "classificacao": classificacao, "titulos": titulos_clube,
+             "chegaram": mov(janela["chegaram"], "veio_de") if janela else [],
+             "sairam": mov(janela["sairam"], "foi_para") if janela else [],
+             "propostas": propostas_novas, "contratos_vencendo": vencendo, "proximos_jogos": proximos,
+             "artilheiros_do_clube": artilheiros}
+    return {k: v for k, v in fatos.items() if v or k == "edicao"}
+
+
+def edicoes_do_jornal(con: sqlite3.Connection, cid: int) -> list[dict]:
+    return [{"data_jogo": r[0], "de": r[1], "conteudo": json.loads(r[2])} for r in con.execute(
+        "SELECT data_jogo, de, conteudo FROM jornal WHERE carreira_id = ? ORDER BY data_jogo DESC", (cid,))]
+
+
+def guardar_edicao(con: sqlite3.Connection, cid: int, fatos: dict, conteudo: dict) -> None:
+    with con:
+        con.execute("INSERT INTO jornal VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET conteudo = excluded.conteudo,"
+                    " fatos = excluded.fatos, de = excluded.de, em = excluded.em",
+                    (cid, fatos["edicao"]["ate"], fatos["edicao"]["de"], json.dumps(conteudo, ensure_ascii=False),
+                     json.dumps(fatos, ensure_ascii=False), datetime.now().isoformat(timespec="seconds")))

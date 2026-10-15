@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auxiliar, banco, ia
+from . import auxiliar, banco, ia, jornal
 from .sincronizar import sincronizar
 
 _casa = Path.home()
@@ -169,6 +169,26 @@ def post_parecer(cid: int, pedido: PedidoDeParecer):
         if p is None:
             raise HTTPException(404, "Proposta não encontrada")
         return p
+
+
+@app.get("/api/carreiras/{cid}/jornal")
+def get_jornal(cid: int):
+    """Edições guardadas e a data da edição que pode ser rodada agora (a do save mais recente)."""
+    with _con() as con:
+        c = _carreira(con, cid)
+        edicoes = banco.edicoes_do_jornal(con, cid)
+        return {"atual": c["data_jogo"], "rodada": any(e["data_jogo"] == c["data_jogo"] for e in edicoes),
+                "edicoes": edicoes}
+
+
+@app.post("/api/carreiras/{cid}/jornal")
+def post_jornal(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        try:
+            return jornal.rodar_edicao(con, cid)
+        except ia.IAIndisponivel as e:
+            raise HTTPException(503, str(e))
 
 
 @app.get("/api/carreiras/{cid}/lendas")

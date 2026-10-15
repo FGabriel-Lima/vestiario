@@ -19,6 +19,8 @@ export const api = {
   mundo: (id, ano) => pedir(`/carreiras/${id}/mundo?ano=${ano}`),
   campeonatos: (id) => pedir(`/carreiras/${id}/campeonatos`),
   titulos: (id) => pedir(`/carreiras/${id}/titulos`),
+  jornal: (id) => pedir(`/carreiras/${id}/jornal`),
+  rodarJornal: (id) => pedir(`/carreiras/${id}/jornal`, { method: "POST" }),
   parecer: (id, p) =>
     pedir(`/carreiras/${id}/propostas/parecer`, {
       method: "POST",

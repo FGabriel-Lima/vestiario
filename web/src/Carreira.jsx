@@ -3,10 +3,10 @@ import { api, dataBR } from "./api.js";
 import Escudo from "./Escudo.jsx";
 import Rosto from "./Rosto.jsx";
 
-const ABAS = ["Visão geral", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
+const ABAS = ["Visão geral", "Jornal", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
 // Abas que olham a carreira inteira e não usam o seletor de temporada
 // (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
-const DA_CARREIRA = new Set(["Campeonatos", "Transferências", "Adversários", "Lendas"]);
+const DA_CARREIRA = new Set(["Jornal", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
 
 const GRAMADO = "#0b1a10"; // --color-pitch-950
 const canais = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -129,6 +129,7 @@ export default function Carreira({ id, onVoltar }) {
             )}
             {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} />}
             {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
+            {aba === "Jornal" && <Jornal id={id} clube={carreira.clube_nome} />}
             {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} />}
             {aba === "Transferências" && <Transferencias id={id} />}
             {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
@@ -805,6 +806,132 @@ function Classificacao({ titulo, linhas, clube, compacta }) {
         })}
       </tbody>
     </table>
+  );
+}
+
+const DATA_EXTENSA = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const extensa = (iso) => DATA_EXTENSA.format(new Date(`${iso}T00:00:00Z`));
+
+// Assinatura do jornal: a capa de um diário esportivo popular, impressa e colada na parede do vestiário com fita
+// crepe. O cabeçalho sai nas cores do clube (como a capa do jornal do clube), a manchete é o maior texto do app.
+function Jornal({ id, clube }) {
+  const [versao, setVersao] = useState(0);
+  const { dados: j, erro } = useDados(() => api.jornal(id), [id, versao]);
+  const [escolhida, setEscolhida] = useState(null);
+  const [rodando, setRodando] = useState(false);
+  const [falha, setFalha] = useState(null);
+  if (erro) return <Erro mensagem={erro} />;
+  if (!j) return null;
+  const rodar = () => {
+    setRodando(true);
+    setFalha(null);
+    api
+      .rodarJornal(id)
+      .then((e) => {
+        setEscolhida(e.data_jogo);
+        setVersao((v) => v + 1);
+      })
+      .catch((e) => setFalha(e.message))
+      .finally(() => setRodando(false));
+  };
+  const edicao = j.edicoes.find((e) => e.data_jogo === escolhida) ?? j.edicoes[0];
+  return (
+    <>
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        {j.edicoes.length > 1 && (
+          <label className="flex flex-col gap-1">
+            <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Edição</span>
+            <select
+              value={edicao.data_jogo}
+              onChange={(e) => setEscolhida(e.target.value)}
+              className="rounded-md border border-pitch-700 bg-pitch-800 px-3 py-2 font-kit text-lg uppercase"
+            >
+              {j.edicoes.map((e) => (
+                <option key={e.data_jogo} value={e.data_jogo}>
+                  {dataBR(e.data_jogo)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {!j.rodada && (
+          <div aria-live="polite" className="flex flex-col items-start gap-2">
+            {rodando ? (
+              <p className="flex items-center gap-2 text-muted">
+                <span aria-hidden="true" className="icone animate-pulse text-gold motion-reduce:animate-none">
+                  newspaper
+                </span>
+                A redação está fechando a edição. Pode levar até meio minuto.
+              </p>
+            ) : (
+              <button
+                onClick={rodar}
+                className="flex items-center gap-2 rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110"
+              >
+                <span aria-hidden="true" className="icone">
+                  newspaper
+                </span>
+                Rodar a edição de {dataBR(j.atual)}
+              </button>
+            )}
+            {falha && <p className="text-sm text-cartao">{falha}</p>}
+          </div>
+        )}
+      </div>
+
+      {edicao ? (
+        <CapaDoJornal edicao={edicao} clube={clube} />
+      ) : (
+        !rodando && (
+          <p className="max-w-xl text-muted">
+            Ainda não saiu nenhuma edição. Rode a primeira: a redação escreve sobre o que aconteceu com o {clube} até
+            o save de {dataBR(j.atual)}, só com o que está no save.
+          </p>
+        )
+      )}
+    </>
+  );
+}
+
+function CapaDoJornal({ edicao, clube }) {
+  const { manchete, linha_fina, materias } = edicao.conteudo;
+  const [principal, ...outras] = materias;
+  return (
+    <article className="jornal mx-auto max-w-4xl" aria-label={`Gazeta do Vestiário de ${extensa(edicao.data_jogo)}`}>
+      <span aria-hidden="true" className="fita absolute -top-4 left-6 z-10 h-8 w-24" style={{ "--giro": "-6deg" }} />
+      <span aria-hidden="true" className="fita absolute -top-4 right-6 z-10 h-8 w-24" style={{ "--giro": "5deg" }} />
+      <header className="jornal-cabecalho">
+        <p className="font-kit text-4xl font-extrabold uppercase leading-none tracking-tight sm:text-6xl">Gazeta do Vestiário</p>
+        <p className="mt-2 flex flex-wrap justify-between gap-x-6 font-kit text-sm font-semibold uppercase tracking-wide">
+          <span>{extensa(edicao.data_jogo)}</span>
+          <span>{edicao.de ? `Cobre de ${dataBR(edicao.de)} a ${dataBR(edicao.data_jogo)}` : `Primeira edição · ${clube}`}</span>
+        </p>
+      </header>
+      <div className="px-5 pb-7 pt-6 sm:px-9">
+        <h2 className="font-kit text-5xl font-extrabold uppercase leading-[0.95] tracking-tight sm:text-7xl">{manchete}</h2>
+        {linha_fina && <p className="mt-4 text-lg leading-snug sm:text-xl">{linha_fina}</p>}
+        {principal && (
+          <section className="mt-7 border-t-4 border-pincel pt-4">
+            <h3 className="font-kit text-3xl font-bold uppercase leading-tight">{principal.titulo}</h3>
+            <p className="mt-2 text-lg leading-relaxed">{principal.texto}</p>
+          </section>
+        )}
+        {outras.length > 0 && (
+          <div className="mt-7 grid grid-cols-1 gap-x-8 gap-y-6 border-t-4 border-pincel pt-5 sm:grid-cols-2">
+            {outras.map((m) => (
+              <section key={m.titulo}>
+                <h3 className="font-kit text-2xl font-bold uppercase leading-tight">{m.titulo}</h3>
+                <p className="mt-1.5 leading-relaxed">{m.texto}</p>
+              </section>
+            ))}
+          </div>
+        )}
+        <p className="mt-8 border-t-2 border-dashed border-pincel/30 pt-3 text-xs text-pincel/70">
+          Escrito pela IA só com os números do save do PES de {dataBR(edicao.data_jogo)}. Nada de declarações ou bastidores
+          inventados.
+        </p>
+      </div>
+    </article>
   );
 }
 
