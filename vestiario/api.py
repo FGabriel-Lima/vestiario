@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auxiliar, banco, feed, ia
+from . import auxiliar, banco, conversas, feed, ia
 from .sincronizar import sincronizar
 
 _casa = Path.home()
@@ -187,6 +187,41 @@ def post_feed(cid: int):
             return feed.atualizar(con, cid)
         except ia.IAIndisponivel as e:
             raise HTTPException(503, str(e))
+
+
+@app.get("/api/carreiras/{cid}/conversas")
+def get_contatos(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return conversas.contatos(con, cid)
+
+
+@app.get("/api/carreiras/{cid}/conversas/{contato}")
+def get_conversa(cid: int, contato: str):
+    with _con() as con:
+        _carreira(con, cid)
+        if (c := conversas.conversa(con, cid, contato)) is None:
+            raise HTTPException(404, "Contato não encontrado no elenco")
+        return c
+
+
+class Mensagem(BaseModel):
+    texto: str
+
+
+@app.post("/api/carreiras/{cid}/conversas/{contato}")
+def post_conversa(cid: int, contato: str, m: Mensagem):
+    with _con() as con:
+        _carreira(con, cid)
+        try:
+            c = conversas.responder(con, cid, contato, m.texto)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except ia.IAIndisponivel as e:
+            raise HTTPException(503, str(e))
+        if c is None:
+            raise HTTPException(404, "Contato não encontrado no elenco")
+        return c
 
 
 @app.get("/api/carreiras/{cid}/lendas")

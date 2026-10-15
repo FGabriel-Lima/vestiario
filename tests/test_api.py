@@ -72,6 +72,18 @@ def test_feed(cliente, monkeypatch):
     assert (f["publicado"], f["posts"][0]["legenda"]) == (True, "Vitória!")
 
 
+def test_conversas(cliente, monkeypatch):
+    con = banco.conectar(api.DB)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10,)), datetime(2026, 10, 15))
+    con.close()
+    assert [c["contato"] for c in cliente.get("/api/carreiras/1/conversas").json()] == ["auxiliar", "10"]
+    monkeypatch.setattr(ia, "responder", lambda *a: {"resposta": "Tô pronto, professor."})
+    r = cliente.post("/api/carreiras/1/conversas/10", json={"texto": "Tudo certo?"}).json()
+    assert r["mensagens"][-1]["texto"] == "Tô pronto, professor."
+    assert cliente.post("/api/carreiras/1/conversas/10", json={"texto": " "}).status_code == 400
+    assert cliente.get("/api/carreiras/1/conversas/999").status_code == 404
+
+
 def test_pasta_de_saves_inexistente(cliente):
     r = cliente.post("/api/sincronizar")
     assert r.status_code == 404 and "VESTIARIO_SAVES" in r.json()["detail"]

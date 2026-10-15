@@ -20,6 +20,14 @@ export const api = {
   campeonatos: (id) => pedir(`/carreiras/${id}/campeonatos`),
   titulos: (id) => pedir(`/carreiras/${id}/titulos`),
   feed: (id) => pedir(`/carreiras/${id}/feed`),
+  contatos: (id) => pedir(`/carreiras/${id}/conversas`),
+  conversa: (id, contato) => pedir(`/carreiras/${id}/conversas/${contato}`),
+  enviar: (id, contato, texto) =>
+    pedir(`/carreiras/${id}/conversas/${contato}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto }),
+    }),
   atualizarFeed: (id) => pedir(`/carreiras/${id}/feed`, { method: "POST" }),
   parecer: (id, p) =>
     pedir(`/carreiras/${id}/propostas/parecer`, {

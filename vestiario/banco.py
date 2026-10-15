@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS post(
   carreira_id INTEGER NOT NULL REFERENCES carreira, edicao TEXT NOT NULL, ordem INTEGER NOT NULL, perfil TEXT NOT NULL,
   tipo TEXT NOT NULL, data TEXT NOT NULL, dados TEXT NOT NULL, legenda TEXT NOT NULL, PRIMARY KEY(carreira_id, edicao, ordem));
 DROP TABLE IF EXISTS jornal;
+-- conversas com o auxiliar ('auxiliar') e os jogadores (player_id em texto); autor = 'tecnico' ou 'contato'
+CREATE TABLE IF NOT EXISTS mensagem(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, contato TEXT NOT NULL, ordem INTEGER NOT NULL, autor TEXT NOT NULL,
+  texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, PRIMARY KEY(carreira_id, contato, ordem));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
@@ -514,15 +518,9 @@ def propostas(con: sqlite3.Connection, cid: int) -> list[dict]:
 POSICOES = ["GO", "ZC", "LE", "LD", "VOL", "MLG", "MLE", "MLD", "MAT", "PTE", "PTD", "SA", "CA"]
 
 
-def fatos_da_proposta(con: sqlite3.Connection, cid: int, pid: int, clube_idx: int, valor: int) -> dict | None:
-    """Tudo o que a IA pode saber sobre uma proposta, só com o que existe no banco (dado ausente fica de fora).
-    valor em unidades do save, como na tabela proposta."""
-    if con.execute("SELECT 1 FROM proposta WHERE carreira_id = ? AND player_id = ? AND clube_idx = ? AND valor = ?",
-                   (cid, pid, clube_idx, valor)).fetchone() is None:
-        return None
-    s = _ultima(con, cid)
+def _jogador(con: sqlite3.Connection, cid: int, s: sqlite3.Row, pid: int) -> tuple[dict, int | None]:
+    """O jogador como a IA o vê: só o que existe no banco. Devolve também o código da posição."""
     ano = s["data_jogo"][:4]
-    interessado = con.execute("SELECT nome FROM time WHERE carreira_id = ? AND idx = ?", (cid, clube_idx)).fetchone()
     elenco = {r[0]: (r[1], r[2]) for r in con.execute(
         "SELECT player_id, idade, valor FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
     jog = con.execute("SELECT nome, posicao FROM jogador WHERE player_id = ?", (pid,)).fetchone()
@@ -547,22 +545,150 @@ def fatos_da_proposta(con: sqlite3.Connection, cid: int, pid: int, clube_idx: in
         jogador["temporada"]["minutos_jogados"] = n["minutos"]
     if n and n["nota"] is not None:
         jogador["temporada"]["nota_media"] = n["nota"]
-    colegas = []
-    if posicao is not None:
-        for r in con.execute("SELECT j.nome, e.idade FROM elenco e JOIN jogador j USING(player_id) "
-                             "WHERE e.sincronizacao_id = ? AND j.posicao = ? AND e.player_id <> ? ORDER BY j.nome",
-                             (s["id"], posicao, pid)):
-            colegas.append({"nome": r["nome"], **({"idade": r["idade"]} if r["idade"] is not None else {})})
+    return jogador, posicao
+
+
+def _colegas(con: sqlite3.Connection, s: sqlite3.Row, pid: int, posicao: int | None) -> list[dict]:
+    if posicao is None:
+        return []
+    return [{"nome": r["nome"], **({"idade": r["idade"]} if r["idade"] is not None else {})} for r in con.execute(
+        "SELECT j.nome, e.idade FROM elenco e JOIN jogador j USING(player_id) "
+        "WHERE e.sincronizacao_id = ? AND j.posicao = ? AND e.player_id <> ? ORDER BY j.nome", (s["id"], posicao, pid))]
+
+
+def _clube(s: sqlite3.Row) -> dict:
     clube = {"nome": s["clube_nome"]}
     if s["orcamento"] is not None:
         clube["orcamento_de_transferencias"] = s["orcamento"] * MOEDA
     clube["data_no_jogo"] = s["data_jogo"]
+    return clube
+
+
+def _ausentes(jogador: dict) -> dict:
     # o que falta vai explícito: sem isso, a IA "compara com o valor de mercado" mesmo sem o valor (aconteceu)
     ausentes = [nome for chave, nome in (("valor_de_mercado", "valor de mercado do jogador"), ("idade", "idade"),
                                          ("contrato", "contrato")) if chave not in jogador]
+    return {"dados_que_nao_temos": ausentes} if ausentes else {}
+
+
+def fatos_da_proposta(con: sqlite3.Connection, cid: int, pid: int, clube_idx: int, valor: int) -> dict | None:
+    """Tudo o que a IA pode saber sobre uma proposta, só com o que existe no banco (dado ausente fica de fora).
+    valor em unidades do save, como na tabela proposta."""
+    if con.execute("SELECT 1 FROM proposta WHERE carreira_id = ? AND player_id = ? AND clube_idx = ? AND valor = ?",
+                   (cid, pid, clube_idx, valor)).fetchone() is None:
+        return None
+    s = _ultima(con, cid)
+    interessado = con.execute("SELECT nome FROM time WHERE carreira_id = ? AND idx = ?", (cid, clube_idx)).fetchone()
+    jogador, posicao = _jogador(con, cid, s, pid)
     return {"proposta": {"clube_interessado": interessado[0] if interessado else None, "valor_oferecido": valor * MOEDA},
-            "jogador": jogador, "elenco_na_mesma_posicao": colegas, "clube": clube,
-            **({"dados_que_nao_temos": ausentes} if ausentes else {})}
+            "jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(s),
+            **_ausentes(jogador)}
+
+
+def _adversario(p: dict, clube: int) -> dict:
+    return {"data": p["data"], "adversario": p["visitante"] if p["mandante_idx"] == clube else p["mandante"],
+            "em_casa": p["mandante_idx"] == clube}
+
+
+def fatos_do_jogador(con: sqlite3.Connection, cid: int, pid: int) -> dict | None:
+    """Fatos para a conversa com um jogador do elenco atual (None se ele não é do elenco)."""
+    s = _ultima(con, cid)
+    if con.execute("SELECT 1 FROM elenco WHERE sincronizacao_id = ? AND player_id = ?", (s["id"], pid)).fetchone() is None:
+        return None
+    clube = s["clube_idx"]
+    jogador, posicao = _jogador(con, cid, s, pid)
+    ultimos = []
+    for r in con.execute(
+            "SELECT p.id, e.minutos, e.nota, e.gols, e.assistencias FROM escalacao e JOIN partida p ON p.id = e.partida_id "
+            "WHERE p.carreira_id = ? AND e.player_id = ? AND e.lado = CASE ? WHEN p.mandante_idx THEN 0 "
+            "WHEN p.visitante_idx THEN 1 END ORDER BY p.data DESC LIMIT 5", (cid, pid, clube)):
+        p = dict(con.execute(_PARTIDA + "WHERE p.id = ?", (r["id"],)).fetchone())
+        jogo = {k: v for k, v in _adversario(p, clube).items() if k != "em_casa"}
+        jogo.update({"minutos": r["minutos"], **({"nota": r["nota"] / 10} if r["nota"] is not None else {}),
+                     "gols": r["gols"], "assistencias": r["assistencias"]})
+        ultimos.append(jogo)
+    if ultimos:
+        jogador["ultimos_jogos"] = ultimos
+    abertas = [{"clube": x["clube"]["nome"], "valor": x["valor"]} for x in propostas(con, cid)
+               if x["player_id"] == pid and x["situacao"] == "aberta"]
+    proximo = next((p for p in partidas(con, cid) if not p["disputada"] and p["data"] > s["data_jogo"]), None)
+    fatos = {"jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(s)}
+    if abertas:
+        fatos["propostas_abertas"] = abertas
+    if proximo:
+        fatos["proximo_jogo"] = _adversario(proximo, clube)
+    return {**fatos, **_ausentes(jogador)}
+
+
+def _ordem_de_setor(posicao: int | None) -> int:
+    """Goleiros, defensores, meio-campistas e atacantes (códigos de POSICOES)."""
+    return 9 if posicao is None else 0 if posicao == 0 else 1 if posicao <= 3 else 2 if posicao <= 8 else 3
+
+
+def elenco_para_conversa(con: sqlite3.Connection, cid: int) -> list[dict]:
+    """O elenco atual por setor e nome, com o que a agenda de contatos e o auxiliar precisam."""
+    s = _ultima(con, cid)
+    contratos = _contratos(con, s["id"])
+    ano = s["data_jogo"][:4]
+    numeros = {r["player_id"]: dict(r) for r in con.execute(
+        _ESTATS + "AND substr(p.data, 1, 4) = :ano GROUP BY e.player_id", {"cid": cid, "clube": s["clube_idx"], "ano": ano})}
+    linhas = []
+    for r in con.execute("SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) AS nome, j.posicao, e.idade "
+                         "FROM elenco e LEFT JOIN jogador j USING(player_id) WHERE e.sincronizacao_id = ?", (s["id"],)):
+        n = numeros.get(r["player_id"], {})
+        linhas.append({"player_id": r["player_id"], "nome": r["nome"], "posicao": r["posicao"], "idade": r["idade"],
+                       "jogos": n.get("jogos", 0), "minutos": n.get("minutos") or 0, "nota": n.get("nota"),
+                       "notas": con.execute(
+                           "SELECT count(e.nota) FROM escalacao e JOIN partida p ON p.id = e.partida_id WHERE p.carreira_id = ?"
+                           " AND e.player_id = ? AND substr(p.data, 1, 4) = ?", (cid, r["player_id"], ano)).fetchone()[0],
+                       "contrato": contratos.get(r["player_id"])})
+    return sorted(linhas, key=lambda l: (_ordem_de_setor(l["posicao"]), l["nome"]))
+
+
+def fatos_do_clube(con: sqlite3.Connection, cid: int) -> dict:
+    """Resumo do clube para o auxiliar técnico."""
+    s = _ultima(con, cid)
+    clube, ate = s["clube_idx"], s["data_jogo"]
+    todas = partidas(con, cid)
+    jogados = [p for p in todas if p["disputada"]]
+    limite = date.fromisoformat(ate)
+    limite = date(limite.year + (limite.month + 5) // 12, (limite.month + 5) % 12 + 1, 1).isoformat()
+    elenco = []
+    for l in elenco_para_conversa(con, cid):
+        j = {"nome": l["nome"]}
+        if l["posicao"] is not None:
+            j["posicao"] = POSICOES[l["posicao"]]
+        if l["idade"] is not None:
+            j["idade"] = l["idade"]
+        j["jogos_na_temporada"] = l["jogos"]
+        if l["minutos"]:
+            j["minutos"] = l["minutos"]
+        if l["nota"] is not None:
+            j["nota_media"] = l["nota"]
+        if c := l["contrato"]:
+            j["contrato_ate" if not c["emprestimo"] else "emprestado_ate"] = c["fim"]
+        elenco.append(j)
+    da_temporada = lambda t: t.startswith(ate[:4]) or t.endswith("/" + ate[2:4])
+    classificacao = []
+    for e in edicoes(con, cid):
+        if e["do_clube"] and e["liga"] and da_temporada(e["temporada"]):
+            fase = edicao(con, cid, e["chave"])["fases"][0]
+            linhas = fase["grupos"][0]["linhas"]
+            if (nossa := next((l for l in linhas if l["idx"] == clube), None)) and nossa["jogos"]:
+                classificacao.append({"competicao": e["nome"], "posicao": nossa["posicao"], "pontos": nossa["pontos"],
+                                      "jogos": nossa["jogos"], "lider": linhas[0]["nome"]})
+    ultimos = []
+    for p in jogados[-5:][::-1]:
+        pro, contra = _placar(p, clube)
+        ultimos.append({**_adversario(p, clube), "placar": f"{pro} x {contra}",
+                        "resultado": "vitória" if pro > contra else "derrota" if pro < contra else "empate"})
+    fatos = {"clube": _clube(s), "elenco": elenco, "classificacao": classificacao, "ultimos_jogos": ultimos,
+             "proximos_jogos": [_adversario(p, clube) for p in todas if not p["disputada"] and p["data"] > ate][:3],
+             "propostas_abertas": [{"clube": x["clube"]["nome"], "jogador": x["nome"], "valor": x["valor"]}
+                                   for x in propostas(con, cid) if x["situacao"] == "aberta"],
+             "contratos_vencendo": [{"nome": j["nome"], "fim": j["contrato_ate"]} for j in elenco
+                                    if j.get("contrato_ate") and j["contrato_ate"] <= limite]}
+    return {k: v for k, v in fatos.items() if v or k in ("clube", "elenco")}
 
 
 def parecer_guardado(con: sqlite3.Connection, cid: int, pid: int, clube_idx: int, valor: int) -> dict | None:

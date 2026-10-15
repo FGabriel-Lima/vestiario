@@ -3,10 +3,10 @@ import { api, dataBR } from "./api.js";
 import Escudo from "./Escudo.jsx";
 import Rosto from "./Rosto.jsx";
 
-const ABAS = ["Visão geral", "Feed", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
+const ABAS = ["Visão geral", "Feed", "Conversas", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
 // Abas que olham a carreira inteira e não usam o seletor de temporada
 // (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
-const DA_CARREIRA = new Set(["Feed", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
+const DA_CARREIRA = new Set(["Feed", "Conversas", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
 
 const GRAMADO = "#0b1a10"; // --color-pitch-950
 const canais = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -52,6 +52,11 @@ export default function Carreira({ id, onVoltar }) {
   const [carreira, setCarreira] = useState(null);
   const [ano, setAno] = useState(null);
   const [aba, setAba] = useState(ABAS[0]);
+  const [contato, setContato] = useState(null);
+  const conversar = (c) => {
+    setContato(c);
+    setAba("Conversas");
+  };
   const [erro, setErro] = useState(null);
 
   useEffect(() => {
@@ -127,9 +132,10 @@ export default function Carreira({ id, onVoltar }) {
             {aba === "Visão geral" && (
               <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
             )}
-            {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} />}
+            {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} />}
             {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
             {aba === "Feed" && <Feed id={id} />}
+            {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} />}
             {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
             {aba === "Transferências" && <Transferencias id={id} />}
             {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
@@ -301,7 +307,7 @@ const CURTOS = { jogos: "J", gols: "G", assistencias: "A" };
 
 const comparar = (x, y) => (typeof x === "string" ? x.localeCompare(y, "pt-BR") : x - y);
 
-function Elenco({ id, ano, dataJogo }) {
+function Elenco({ id, ano, dataJogo, onConversar }) {
   const { dados: linhas, erro } = useDados(() => api.elenco(id, ano), [id, ano]);
   const [ordem, setOrdem] = useState("jogos");
   if (erro) return <Erro mensagem={erro} />;
@@ -353,9 +359,19 @@ function Elenco({ id, ano, dataJogo }) {
                 <div className="flex items-center gap-3">
                   <Rosto id={l.player_id} className={`size-9 ${l.no_elenco ? "" : "opacity-60 grayscale"}`} />
                   <span className="min-w-0">
-                    <span className="block">
+                    <span className="flex items-center gap-2">
                       {l.nome}
-                      {!l.no_elenco && <span className="ml-2 font-kit text-sm uppercase tracking-wide">saiu</span>}
+                      {!l.no_elenco && <span className="font-kit text-sm uppercase tracking-wide">saiu</span>}
+                      {l.no_elenco && (
+                        <button
+                          onClick={() => onConversar(String(l.player_id))}
+                          aria-label={`Chamar ${l.nome} pra conversa`}
+                          title="Chamar pra conversa"
+                          className="grid size-7 place-items-center rounded-full text-muted hover:bg-pitch-800 hover:text-destaque"
+                        >
+                          <span aria-hidden="true" className="icone text-lg">chat</span>
+                        </button>
+                      )}
                     </span>
                     <span className={`flex items-center gap-2 text-sm sm:hidden ${vencendo(c) ? "text-gold" : "text-muted"}`}>
                       <Posicao codigo={l.posicao} className="w-9 py-0 text-xs" />
@@ -1263,6 +1279,245 @@ function ArteDoPost({ post }) {
         </div>
       );
   }
+}
+
+// Conversas: a agenda do celular do treinador. O auxiliar fica fixado no topo; os atletas vêm por setor, com os
+// sinais que o código tirou dos números (quem joga pouco, contrato vencendo, proposta). A resposta do contato chega
+// como um bilhete de papel, o mesmo do parecer do auxiliar: é a voz do vestiário, escrita só com fatos do save.
+const SETORES = [
+  ["Goleiros", (p) => p === 0],
+  ["Defensores", (p) => p >= 1 && p <= 3],
+  ["Meio-campistas", (p) => p >= 4 && p <= 8],
+  ["Atacantes", (p) => p >= 9],
+];
+const SINAL_COR = {
+  "joga pouco": "bg-cartao/20 text-cartao",
+  "contrato vencendo": "bg-gold/20 text-gold",
+  "fase ruim": "bg-cartao/20 text-cartao",
+  "em boa fase": "bg-neon/15 text-neon",
+};
+const corDoSinal = (s) => SINAL_COR[s] ?? (s.startsWith("proposta") ? "bg-[#4aa3ff]/20 text-[#7cc0ff]" : "bg-pitch-800 text-muted");
+// os sinais que puxam assunto vêm primeiro na agenda
+const PESO = (s) => (s.startsWith("proposta") ? 0 : s === "contrato vencendo" ? 1 : s === "joga pouco" ? 2 : s === "fase ruim" ? 3 : 5);
+
+function Conversas({ id, contato, onContato }) {
+  const [versao, setVersao] = useState(0);
+  const { dados: lista, erro } = useDados(() => api.contatos(id), [id, versao]);
+  if (erro) return <Erro mensagem={erro} />;
+  if (!lista) return null;
+  const auxiliar = lista[0];
+  const atletas = lista.slice(1);
+  return (
+    <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-pitch-800 lg:h-[44rem] lg:grid-cols-[21rem_1fr]">
+      <nav aria-label="Contatos" className={`overflow-y-auto border-pitch-800 bg-pitch-900 lg:border-r ${contato ? "hidden lg:block" : ""}`}>
+        <Contato c={auxiliar} ativo={contato === "auxiliar"} onClick={() => onContato("auxiliar")} fixado />
+        {SETORES.map(([titulo, do_setor]) => {
+          const doSetor = atletas.filter((c) => c.posicao != null && do_setor(c.posicao));
+          return (
+            doSetor.length > 0 && (
+              <section key={titulo}>
+                <h3 className="sticky top-0 z-10 bg-pitch-900/95 px-4 pb-1 pt-4 font-kit text-sm font-semibold uppercase tracking-[0.2em] text-muted">
+                  {titulo}
+                </h3>
+                {doSetor.map((c) => (
+                  <Contato key={c.contato} c={c} ativo={contato === c.contato} onClick={() => onContato(c.contato)} />
+                ))}
+              </section>
+            )
+          );
+        })}
+      </nav>
+      <div className={`min-h-[36rem] bg-pitch-950 ${contato ? "" : "hidden lg:grid lg:place-items-center"}`}>
+        {contato ? (
+          <Conversa key={contato} id={id} contato={contato} onVoltar={() => onContato(null)} onMudou={() => setVersao((v) => v + 1)} />
+        ) : (
+          <p className="max-w-xs text-center text-muted">
+            Escolha um contato. O auxiliar conhece o elenco inteiro; cada atleta fala do próprio momento.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Contato({ c, ativo, onClick, fixado = false }) {
+  const sinais = [...c.sinais].sort((a, b) => PESO(a) - PESO(b)).slice(0, 2);
+  return (
+    <button
+      onClick={onClick}
+      aria-current={ativo ? "true" : undefined}
+      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left ${ativo ? "bg-pitch-800" : "hover:bg-pitch-800/60"} ${
+        fixado ? "border-b border-pitch-800 py-3.5" : ""
+      }`}
+    >
+      {fixado ? (
+        <span className="grid size-11 shrink-0 place-items-center rounded-full bg-destaque/15 ring-2 ring-destaque">
+          <span aria-hidden="true" className="icone text-2xl text-destaque">sports</span>
+        </span>
+      ) : (
+        <Rosto id={c.player_id} className="size-11" />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate font-semibold">{c.nome}</span>
+          {fixado && <span aria-label="fixado" className="icone text-base text-muted">push_pin</span>}
+          {!fixado && <Posicao codigo={c.posicao} className="w-9 shrink-0 py-0 text-xs" />}
+        </span>
+        <span className="block truncate text-sm text-muted">
+          {c.ultima ?? (fixado ? "Elenco, propostas, renovações e próximo jogo" : `${c.idade ?? "?"} anos`)}
+        </span>
+        {sinais.length > 0 && (
+          <span className="mt-1 flex flex-wrap gap-1">
+            {sinais.map((s) => (
+              <span key={s} className={`rounded-sm px-1.5 font-kit text-xs font-semibold uppercase tracking-wide ${corDoSinal(s)}`}>
+                {s}
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+function Conversa({ id, contato, onVoltar, onMudou }) {
+  const { dados: c, erro } = useDados(() => api.conversa(id, contato), [id, contato]);
+  const [mensagens, setMensagens] = useState(null);
+  const [texto, setTexto] = useState("");
+  const [digitando, setDigitando] = useState(false);
+  const [falha, setFalha] = useState(null);
+  const fim = useRef(null);
+  const lista = mensagens ?? c?.mensagens ?? [];
+  useEffect(() => {
+    fim.current?.scrollIntoView({ block: "end" });
+  }, [lista.length, digitando]);
+  if (erro) return <div className="p-6"><Erro mensagem={erro} /></div>;
+  if (!c) return null;
+  const auxiliar = contato === "auxiliar";
+  const j = c.fatos.jogador;
+  const enviar = (t) => {
+    const msg = t.trim();
+    if (!msg || digitando) return;
+    setFalha(null);
+    setTexto("");
+    setMensagens([...lista, { autor: "tecnico", texto: msg }]);
+    setDigitando(true);
+    api
+      .enviar(id, contato, msg)
+      .then((r) => {
+        setMensagens(r.mensagens);
+        onMudou();
+      })
+      .catch((e) => {
+        setFalha(e.message);
+        setMensagens(lista);
+        setTexto(msg);
+      })
+      .finally(() => setDigitando(false));
+  };
+  const nome = auxiliar ? "Auxiliar técnico" : j.nome;
+  const numeros = auxiliar
+    ? [c.fatos.clube.orcamento_de_transferencias && `orçamento ${REAIS.format(c.fatos.clube.orcamento_de_transferencias)}`,
+       c.fatos.classificacao?.[0] && `${c.fatos.classificacao[0].posicao}º no ${c.fatos.classificacao[0].competicao}`]
+    : [j.temporada.minutos_jogados ? `${j.temporada.minutos_jogados} min` : `${j.temporada.jogos} jogos`,
+       j.temporada.nota_media && `nota ${j.temporada.nota_media.toFixed(1)}`,
+       j.contrato && (j.contrato.emprestado_ate ? `emprestado até ${dataBR(j.contrato.emprestado_ate).slice(3)}` : `contrato até ${dataBR(j.contrato.fim).slice(3)}`),
+       j.valor_de_mercado && REAIS.format(j.valor_de_mercado)];
+  return (
+    <section aria-label={`Conversa com ${nome}`} className="flex h-[36rem] flex-col lg:h-[44rem]">
+      <header className="flex items-center gap-3 border-b border-pitch-800 bg-pitch-900 px-4 py-3">
+        <button onClick={onVoltar} aria-label="Voltar aos contatos" className="grid size-8 place-items-center rounded-full hover:bg-pitch-800 lg:hidden">
+          <span aria-hidden="true" className="icone">arrow_back</span>
+        </button>
+        {auxiliar ? (
+          <span className="grid size-11 place-items-center rounded-full bg-destaque/15 ring-2 ring-destaque">
+            <span aria-hidden="true" className="icone text-2xl text-destaque">sports</span>
+          </span>
+        ) : (
+          <Rosto id={Number(contato)} className="size-11" />
+        )}
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 font-semibold">
+            {nome}
+            {!auxiliar && j.posicao && <span className="font-kit text-sm text-muted">{j.posicao}{j.idade ? ` · ${j.idade} anos` : ""}</span>}
+          </p>
+          <p className="truncate font-kit text-sm uppercase tracking-wide text-muted">{numeros.filter(Boolean).join(" · ")}</p>
+        </div>
+      </header>
+
+      <ol aria-live="polite" className="flex-1 space-y-3 overflow-y-auto px-4 py-5">
+        {lista.length === 0 && !digitando && (
+          <li className="mx-auto max-w-sm text-center text-sm text-muted">
+            {auxiliar
+              ? "Pergunte ao auxiliar sobre o elenco, as propostas ou o próximo jogo."
+              : `Puxe o assunto com ${j.nome}. Ele responde com base nos números dele no save.`}
+          </li>
+        )}
+        {lista.map((m, i) =>
+          m.autor === "tecnico" ? (
+            <li key={i} className="ml-auto max-w-[80%] rounded-2xl rounded-br-sm bg-pitch-700 px-4 py-2.5 leading-relaxed">
+              {m.texto}
+            </li>
+          ) : (
+            <li key={i} className="balao-papel mr-auto max-w-[85%] leading-relaxed">
+              {m.texto}
+            </li>
+          ),
+        )}
+        {digitando && (
+          <li className="balao-papel mr-auto flex w-16 items-center justify-center gap-1" aria-label={`${nome} está digitando`}>
+            {[0, 1, 2].map((k) => (
+              <span key={k} className="ponto-digitando" style={{ animationDelay: `${k * 160}ms` }} />
+            ))}
+          </li>
+        )}
+        <li ref={fim} aria-hidden="true" />
+      </ol>
+
+      {falha && <p className="px-4 pb-2 text-sm text-cartao">{falha}</p>}
+      <div className="border-t border-pitch-800 bg-pitch-900 px-3 pb-3 pt-2">
+        {c.atalhos.length > 0 && (
+          <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+            {c.atalhos.map((a) => (
+              <button
+                key={a}
+                onClick={() => enviar(a)}
+                disabled={digitando}
+                className="shrink-0 rounded-full border border-pitch-700 px-3 py-1 text-sm hover:border-destaque hover:text-destaque disabled:opacity-50"
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            enviar(texto);
+          }}
+          className="flex gap-2"
+        >
+          <label className="sr-only" htmlFor="mensagem">Mensagem para {nome}</label>
+          <input
+            id="mensagem"
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            placeholder="Escreva uma mensagem"
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-full border border-pitch-700 bg-pitch-950 px-4 py-2 placeholder:text-muted"
+          />
+          <button
+            type="submit"
+            disabled={digitando || !texto.trim()}
+            aria-label="Enviar"
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-destaque text-pitch-950 disabled:opacity-40"
+          >
+            <span aria-hidden="true" className="icone">send</span>
+          </button>
+        </form>
+      </div>
+    </section>
+  );
 }
 
 const REAIS = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
