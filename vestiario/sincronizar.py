@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from . import banco, leitor, patch
+from . import banco, feed, ia, leitor, patch
 
 
 def _faltam(pasta: Path, ids: set[int]) -> set[int]:
@@ -76,4 +76,12 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pas
             extrair_do_patch(con, pasta_pes, pasta_escudos, pasta_rostos)
         except Exception as e:  # fronteira de confiança: escudos, minifaces e cores são opcionais
             avisos.append(f"Escudos, minifaces e cores dos times indisponíveis ({e}).")
+
+    # o feed de cada carreira que mudou sai junto com a sincronização (uma chamada à IA por carreira)
+    for cid in dict.fromkeys(r["carreira_id"] for r in resultados if r.get("status") == "ok"):
+        try:
+            feed.atualizar(con, cid)
+        except ia.IAIndisponivel as e:
+            nome = next(r["carreira"] for r in resultados if r.get("carreira_id") == cid)
+            avisos.append(f"Feed de {nome} não publicado: {e} Use o botão na aba Feed.")
     return {"avisos": avisos, "arquivos": resultados}

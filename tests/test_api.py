@@ -183,3 +183,24 @@ def test_sincronizar_extrai_minifaces_do_elenco(cliente, monkeypatch):
     r = cliente.get("/api/rostos/10")
     assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (128, 128)
     assert cliente.get("/api/rostos/11").status_code == 404
+
+
+
+def test_sincronizar_publica_o_feed(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save("2026-03-01", [
+        partida("2026-02-01", 0, 1, (2, 0), [atuacao(10, 0, 2)])]))
+    (api.SAVES).mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    monkeypatch.setattr(ia, "responder", lambda *a: {"posts": [{"id": 0, "legenda": "Vitória!"}]})
+    assert not any("Feed" in a for a in cliente.post("/api/sincronizar").json()["avisos"])
+    assert cliente.get("/api/carreiras/1/feed").json()["publicado"] is True
+
+
+def test_sincronizar_sem_ia_avisa_e_nao_publica(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save("2026-03-01", [
+        partida("2026-02-01", 0, 1, (2, 0), [atuacao(10, 0, 2)])]))
+    (api.SAVES).mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    avisos = cliente.post("/api/sincronizar").json()["avisos"]
+    assert any("Feed de" in a and "aba Feed" in a for a in avisos)
+    assert cliente.get("/api/carreiras/1/feed").json()["publicado"] is False

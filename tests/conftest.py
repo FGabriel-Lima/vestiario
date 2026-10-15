@@ -8,6 +8,22 @@ from vestiario.leitor import Atuacao, Contrato, Negocio, Partida, Proposta, Save
 SAVES = Path(__file__).resolve().parent.parent / "saves"
 
 
+from vestiario import ia as _ia
+
+RESPONDER_REAL = _ia.responder  # para o teste do próprio ia.responder
+
+
+@pytest.fixture(autouse=True)
+def sem_ia_de_verdade(monkeypatch):
+    """Nenhum teste chama o Gemini: quem precisa da IA troca ia.responder por uma resposta pronta."""
+    from vestiario import ia
+
+    def sem_ia(*_):
+        raise ia.IAIndisponivel("IA desligada nos testes.")
+
+    monkeypatch.setattr(ia, "responder", sem_ia)
+
+
 @pytest.fixture(scope="session")
 def save_atual() -> Save:
     """Cópia de um save real em saves/ML00000002 (fora do git). Sem ela, o teste é pulado."""

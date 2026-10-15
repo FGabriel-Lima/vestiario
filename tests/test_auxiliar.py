@@ -83,6 +83,8 @@ def test_demora_do_flash_cai_para_o_flash_lite(monkeypatch):
         corpo = {"candidates": [{"content": {"parts": [{"text": js.dumps({"ok": True})}]}}]}
         return io.BytesIO(js.dumps(corpo).encode())
 
+    from conftest import RESPONDER_REAL
+    monkeypatch.setattr(ia, "responder", RESPONDER_REAL)
     monkeypatch.setenv("VESTIARIO_GEMINI_KEY", "teste")
     monkeypatch.setattr(ia.urllib.request, "urlopen", abrir)
     assert ia.responder("x", {}, {}) == {"ok": True}
