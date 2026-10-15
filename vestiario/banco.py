@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS sincronizacao(
   em TEXT NOT NULL, data_jogo TEXT NOT NULL, clube_idx INTEGER NOT NULL, clube_nome TEXT NOT NULL,
   orcamento INTEGER);
 CREATE TABLE IF NOT EXISTS elenco(
-  sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, idade INTEGER);
+  sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, idade INTEGER,
+  valor INTEGER);
 -- clube de cada jogador do mundo naquela sincronização (origem e destino das transferências)
 CREATE TABLE IF NOT EXISTS vinculo(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, time_idx INTEGER NOT NULL,
@@ -65,6 +66,10 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
             con.execute("DELETE FROM arquivo")
     if "posicao" not in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}:
         con.execute("ALTER TABLE jogador ADD COLUMN posicao INTEGER")  # preenchida na próxima sincronização
+    if "valor" not in {r[1] for r in con.execute("PRAGMA table_info(elenco)")}:
+        with con:  # banco anterior ao valor de mercado: relê os saves para preenchê-lo
+            con.execute("ALTER TABLE elenco ADD COLUMN valor INTEGER")
+            con.execute("DELETE FROM arquivo")
     if "emprestimo" not in {r[1] for r in con.execute("PRAGMA table_info(contrato)")}:
         with con:  # banco anterior aos empréstimos: relê os saves para marcar quem veio emprestado
             con.execute("ALTER TABLE contrato ADD COLUMN emprestimo INTEGER NOT NULL DEFAULT 0")
@@ -139,7 +144,8 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
             (cid, em.isoformat(timespec="seconds"), save.data_jogo.isoformat(), save.clube_idx, save.clube,
              save.orcamento),
         ).fetchone()[0]
-        con.executemany("INSERT INTO elenco VALUES(?, ?, ?)", [(sid, p, save.idades.get(p)) for p in save.elenco])
+        con.executemany("INSERT INTO elenco VALUES(?, ?, ?, ?)",
+                        [(sid, p, save.idades.get(p), save.valores.get(p)) for p in save.elenco])
         con.executemany("INSERT INTO contrato VALUES(?, ?, ?, ?, ?, ?)",
                         [(sid, p, c.salario_anual, c.multa, c.fim.isoformat(), int(c.emprestimo))
                          for p, c in save.contratos.items()])
@@ -322,10 +328,10 @@ def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
     linhas = {r["player_id"]: dict(r) for r in con.execute(
         _ESTATS + "AND substr(p.data, 1, 4) = :ano GROUP BY e.player_id",
         {"cid": cid, "clube": s["clube_idx"], "ano": str(ano)})}
-    atuais = {r[0]: (r[1], r[2], r[3]) for r in con.execute(
-        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id), j.posicao, e.idade FROM elenco e "
+    atuais = {r[0]: (r[1], r[2], r[3], r[4]) for r in con.execute(
+        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id), j.posicao, e.idade, e.valor FROM elenco e "
         "LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.sincronizacao_id = ?", (s["id"],))}
-    for pid, (nome, posicao, _) in atuais.items() if ano == int(s["data_jogo"][:4]) else ():
+    for pid, (nome, posicao, *_) in atuais.items() if ano == int(s["data_jogo"][:4]) else ():
         linhas.setdefault(pid, {"player_id": pid, "nome": nome, "posicao": posicao, "jogos": 0, "gols": 0,
                                 "assistencias": 0})
     contratos = _contratos(con, s["id"])
@@ -333,6 +339,7 @@ def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
         linha["no_elenco"] = pid in atuais
         linha["contrato"] = contratos.get(pid) if pid in atuais else None
         linha["idade"] = atuais[pid][2] if pid in atuais else None
+        linha["valor"] = atuais[pid][3] * MOEDA if pid in atuais and atuais[pid][3] is not None else None
     return sorted(linhas.values(), key=lambda l: (-l["jogos"], l["nome"]))
 
 

@@ -290,8 +290,10 @@ def test_banco_sem_orcamento_ganha_as_colunas_e_rele_os_saves(tmp_path):
 
 def test_idade_no_elenco(con):
     banco.gravar_nomes(con, {10: "Veterano", 11: "Sem idade"})
-    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 11), idades={10: 35, 99: 20}), AGORA)
-    assert {l["nome"]: l["idade"] for l in banco.elenco(con, 1, 2026)} == {"Veterano": 35, "Sem idade": None}
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 11), idades={10: 35, 99: 20},
+                                               valores={10: 8000}), AGORA)
+    assert {l["nome"]: (l["idade"], l["valor"]) for l in banco.elenco(con, 1, 2026)} == {
+        "Veterano": (35, 8000 * MOEDA), "Sem idade": (None, None)}
 
 
 def test_banco_sem_idade_ganha_a_coluna_e_rele_os_saves(tmp_path):

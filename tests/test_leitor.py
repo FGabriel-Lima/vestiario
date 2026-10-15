@@ -6,7 +6,7 @@ import pytest
 
 from vestiario.leitor import (ELENCO, LIVRO0, LIVRO_N, LIVRO_TAM, MOEDA, PARTIDA0, PARTIDA_TAM, PARTIDAS, TIME_ID,
                               TIME_TAM, VAZIO, BLOCO0, COMPETICAO_TAM, COMPETICOES0, FormatoInvalido, ler_competicoes,
-                              ler_contratos, ler_descricao, ler_elenco, ler_idades, ler_ids, ler_negocios, ler_partidas)
+                              ler_bloco, ler_contratos, ler_descricao, ler_elenco, ler_ids, ler_negocios, ler_partidas)
 
 
 def tabela_vazia() -> bytearray:
@@ -193,12 +193,14 @@ def test_save_real_orcamento(save_atual):
     assert save_atual.orcamento * MOEDA == 443_590_580  # "Orçam. transf." na tela do PES em 31/01/2026
 
 
-def bloco_compactado(registros: list[tuple[int, int]]) -> bytes:
-    """Bloco como o do save: registros de 156 bytes (idade em +18, bits 2..7; player_id em +36), em pedaços zlib."""
+def bloco_compactado(registros: list[tuple]) -> bytes:
+    """Bloco como o do save: registros de 156 bytes (idade em +18, bits 2..7; player_id em +36; valor de mercado em
+    +120), em pedaços zlib. registros = (player_id, idade[, valor])."""
     raw = bytearray(156 * len(registros))
-    for k, (pid, idade) in enumerate(registros):
+    for k, (pid, idade, *valor) in enumerate(registros):
         raw[k * 156 + 18] = idade << 2 | 0b01
         struct.pack_into("<I", raw, k * 156 + 36, pid)
+        struct.pack_into("<I", raw, k * 156 + 120, valor[0] if valor else 0)
     pedacos = b""
     for i in range(0, len(raw), 200):
         z = zlib.compress(bytes(raw[i:i + 200]))
@@ -207,9 +209,9 @@ def bloco_compactado(registros: list[tuple[int, int]]) -> bytes:
 
 
 def test_idades_do_bloco_compactado():
-    data = bytes(BLOCO0) + bloco_compactado([(60657, 33), (0x40000000 | 65134, 35), (0, 0)])
-    assert ler_idades(data) == {60657: 33, 65134: 35}
-    assert ler_idades(bytes(BLOCO0 + 100)) == {}  # sem a assinatura: sem idades, sem quebrar
+    data = bytes(BLOCO0) + bloco_compactado([(60657, 33, 8000), (0x40000000 | 65134, 35, 10000), (0, 0)])
+    assert ler_bloco(data) == ({60657: 33, 65134: 35}, {60657: 8000, 65134: 10000})
+    assert ler_bloco(bytes(BLOCO0 + 100)) == ({}, {})  # sem a assinatura: sem idades nem valores, sem quebrar
 
 
 def test_save_real_idades(save_atual):
@@ -224,3 +226,14 @@ def test_jogador_emprestado_ao_clube():
     c = ler_contratos(b"\x1b" * 7 + contratado + emprestimo, [41204, 160150])
     assert (c[160150].emprestimo, c[160150].fim, c[160150].salario_anual) == (True, date(2026, 12, 31), 0)
     assert c[41204].emprestimo is False
+
+
+def test_proposta_de_outro_clube_nao_substitui_o_contrato():
+    # Liga Master 04: o Flamengo ofereceu outro contrato ao Tolói; o registro da proposta (sem o id da carreira)
+    # fica 35 registros depois, alinhado com a tabela, e não pode passar por cima do contrato de verdade
+    contrato = registro_de_contrato(0x0F9B, 47128, 16182, 10160, (2027, 1, 31), (2026, 1, 1))
+    outro = registro_de_contrato(0x0F9C, 50000, 1000, 1, (2028, 1, 31), (2026, 1, 1))
+    proposta = registro_de_contrato(0x0F9B, 47128, 17747, 7760, (2027, 1, 31), (2026, 1, 1), carreira=bytes.fromhex("66c05302"))
+    data = b"\x1b" * 5 + contrato + outro + bytes(48) * 33 + proposta
+    c = ler_contratos(data, [47128, 50000])
+    assert (c[47128].multa, c[47128].salario_anual) == (10160, 16182)

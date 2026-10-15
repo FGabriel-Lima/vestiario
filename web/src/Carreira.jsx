@@ -288,6 +288,7 @@ const COLUNAS = [
   ["jogos", "Jogos", (l) => l.jogos],
   ["gols", "Gols", (l) => l.gols],
   ["assistencias", "Assist.", (l) => l.assistencias],
+  ["valor", "Valor", (l) => l.valor ?? -1, false, true],
   ["salario", "Salário/sem.", (l) => l.contrato?.salario_semanal ?? -1, false, true],
   ["multa", "Multa", (l) => l.contrato?.multa ?? -1, false, true],
   ["fim", "Contrato até", (l) => l.contrato?.fim ?? "9999", true, true],
@@ -367,6 +368,7 @@ function Elenco({ id, ano, dataJogo }) {
               <td className="text-right font-kit text-xl">{l.jogos}</td>
               <td className="text-right font-kit text-xl">{l.gols}</td>
               <td className="text-right font-kit text-xl">{l.assistencias}</td>
+              <td className="hidden text-right font-kit text-xl text-gold sm:table-cell">{l.valor ? <Dinheiro valor={l.valor} /> : null}</td>
               <td className="hidden text-right font-kit text-xl sm:table-cell">
                 {/* o save não guarda salário de quem veio emprestado, só o fim do empréstimo */}
                 {c && (c.emprestimo ? <span className="rounded-sm bg-pitch-700 px-1.5 text-xs uppercase text-muted">emprestado</span> : <Dinheiro valor={c.salario_semanal} />)}

@@ -27,6 +27,7 @@ ORCAMENTO = 13_098_240               # u32 orçamento de transferências (× MOE
 # Bloco compactado (assinatura 20 11 09 12, fixo nos 4 saves conferidos): pedaços zlib com cabeçalho BE.
 # Descompactado, 30.001 registros de 156 bytes, um por jogador da ML (inclusive os gerados por ela).
 BLOCO0, BLOCO_REG, BLOCO_ID, BLOCO_IDADE = 18_088_888, 156, 36, 18  # idade em +18, bits 2..7
+BLOCO_VALOR = 120                    # u32 valor de mercado (× MOEDA = R$; conferido com Tolói e Sabino na Liga Master 04)
 CONTRATO_TAM = 48                    # contratos do clube do usuário; a tabela muda de lugar (veja ler_contratos)
 
 
@@ -89,6 +90,7 @@ class Save:
     contratos: dict[int, Contrato] = field(default_factory=dict)  # player_id → contrato, só do clube do usuário
     orcamento: int | None = None     # orçamento de transferências (× MOEDA = R$)
     idades: dict[int, int] = field(default_factory=dict)  # player_id → idade atual na ML
+    valores: dict[int, int] = field(default_factory=dict)  # player_id → valor de mercado (× MOEDA = R$)
     competicoes: dict[int, str] = field(default_factory=dict)  # id → nome
 
 
@@ -171,8 +173,13 @@ def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
         return {}
     carreira = Counter(c[1] for c in candidatos).most_common(1)[0][0]
     base = min(o for o, chave, *_ in candidatos if chave == carreira)
-    contratos = {pid: c for o, chave, pid, c in candidatos
-                 if chave == carreira or ((o - base) % CONTRATO_TAM == 0 and abs(o - base) <= CONTRATO_TAM * 64)}
+    contratos = {pid: c for o, chave, pid, c in candidatos if chave == carreira}
+    fim_tabela = max(o for o, chave, *_ in candidatos if chave == carreira)
+    # sem o id da carreira só entra quem não tem contrato com ele e está na tabela (ou colado nela). Mais adiante, no
+    # mesmo alinhamento, ficam os termos das propostas de outros clubes (Flamengo pelo Tolói na Liga Master 04)
+    for o, chave, pid, c in candidatos:
+        if pid not in contratos and (o - base) % CONTRATO_TAM == 0 and base - CONTRATO_TAM * 64 <= o <= fim_tabela + CONTRATO_TAM * 3:
+            contratos[pid] = c
     # quem veio emprestado fica noutra tabela, perto desta: (vaga, player_id, 8 bytes zerados, fim do empréstimo, 0xFFFF)
     # (conferido com Cauly, Artur e Pedro Lima, emprestados ao São Paulo no começo da Liga Master 04)
     for pid in set(elenco) - contratos.keys():
@@ -186,10 +193,10 @@ def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
     return contratos
 
 
-def ler_idades(data: bytes) -> dict[int, int]:
-    """Idade atual de cada jogador na ML (a do Player.bin é a do patch e não avança com as temporadas)."""
+def ler_bloco(data: bytes) -> tuple[dict[int, int], dict[int, int]]:
+    """Idade atual e valor de mercado de cada jogador na ML (a idade do Player.bin é a do patch e não avança)."""
     if data[BLOCO0:BLOCO0 + 4] != bytes.fromhex("20110912"):
-        return {}  # ponytail: posição fixa nos saves conferidos; noutro layout o elenco fica sem idade
+        return {}, {}  # ponytail: posição fixa nos saves conferidos; noutro layout o elenco fica sem idade e valor
     total = struct.unpack_from(">I", data, BLOCO0 + 8)[0]
     p, raw = BLOCO0 + 16, bytearray()
     try:
@@ -198,12 +205,13 @@ def ler_idades(data: bytes) -> dict[int, int]:
             raw += zlib.decompress(data[p + 12:p + 12 + tam])
             p += 12 + tam
     except (struct.error, zlib.error):
-        return {}
-    idades = {}
+        return {}, {}
+    idades, valores = {}, {}
     for o in range(0, len(raw) - BLOCO_REG + 1, BLOCO_REG):
         if pid := struct.unpack_from("<I", raw, o + BLOCO_ID)[0] & PID:
             idades[pid] = raw[o + BLOCO_IDADE] >> 2
-    return idades
+            valores[pid] = struct.unpack_from("<I", raw, o + BLOCO_VALOR)[0]
+    return idades, valores
 
 
 def ler_competicoes(data: bytes) -> dict[int, str]:
@@ -257,4 +265,4 @@ def ler_save(raw: bytes) -> Save:
     elencos = [ler_elenco(data, i) for i in range(len(times))]
     return Save(nome, clube, data_jogo, times, idx, elencos[idx], ler_partidas(data, len(times)),
                 ler_ids(data, len(times)), elencos, ler_negocios(data), ler_contratos(data, elencos[idx]),
-                struct.unpack_from("<I", data, ORCAMENTO)[0], ler_idades(data), ler_competicoes(data))
+                struct.unpack_from("<I", data, ORCAMENTO)[0], *ler_bloco(data), ler_competicoes(data))
