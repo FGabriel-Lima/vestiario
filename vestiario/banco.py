@@ -49,6 +49,10 @@ DROP TABLE IF EXISTS jornal;
 CREATE TABLE IF NOT EXISTS mensagem(
   carreira_id INTEGER NOT NULL REFERENCES carreira, contato TEXT NOT NULL, ordem INTEGER NOT NULL, autor TEXT NOT NULL,
   texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, PRIMARY KEY(carreira_id, contato, ordem));
+-- promessas do treinador a um jogador, achadas pela IA na conversa; a cobrança olha os jogos depois de data_jogo
+CREATE TABLE IF NOT EXISTS promessa(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, ordem INTEGER NOT NULL,
+  texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, PRIMARY KEY(carreira_id, player_id, ordem));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
@@ -633,9 +637,28 @@ def fatos_do_jogador(con: sqlite3.Connection, cid: int, pid: int) -> dict | None
     fatos = {"jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(s)}
     if abertas:
         fatos["propostas_abertas"] = abertas
+    if feitas := promessas(con, cid, pid):
+        fatos["promessas_do_professor"] = feitas
     if proximo:
         fatos["proximo_jogo"] = _adversario(proximo, clube)
     return {**fatos, **_ausentes(jogador)}
+
+
+def promessas(con: sqlite3.Connection, cid: int, pid: int, limite: int = 3) -> list[dict]:
+    """As últimas promessas do treinador ao jogador e o que aconteceu nos jogos do clube depois de cada uma."""
+    s = _ultima(con, cid)
+    disputadas = [p["data"] for p in partidas(con, cid) if p["disputada"]]
+    lista = []
+    for r in con.execute("SELECT texto, data_jogo FROM promessa WHERE carreira_id = ? AND player_id = ? "
+                         "ORDER BY ordem DESC LIMIT ?", (cid, pid, limite)):
+        n = con.execute(_ESTATS + "AND p.data > :desde AND e.player_id = :pid GROUP BY e.player_id",
+                        {"cid": cid, "clube": s["clube_idx"], "desde": r["data_jogo"], "pid": pid}).fetchone()
+        desde = {"jogos_do_clube": sum(d > r["data_jogo"] for d in disputadas), "jogos": n["jogos"] if n else 0,
+                 "minutos": n["minutos"] if n else 0}
+        if n and n["nota"] is not None:
+            desde["nota_media"] = n["nota"]
+        lista.append({"promessa": r["texto"], "feita_em": r["data_jogo"], "desde_entao": desde})
+    return lista
 
 
 def _ordem_de_setor(posicao: int | None) -> int:

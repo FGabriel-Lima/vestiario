@@ -21,6 +21,12 @@ com o seu treinador por mensagem. Fale em primeira pessoa, como o jogador dos fa
 sentimento, ambição e preocupação; o seu estado vem de "como_voce_esta" (por exemplo, quem joga pouco cobra espaço,
 quem tem contrato vencendo puxa o assunto da renovação, quem tem proposta sabe dela).
 
+Promessas: se a mensagem do treinador prometer algo concreto a você (mais minutos, vaga de titular, renovação,
+aumento, não ser vendido), resuma a promessa em "promessa", em poucas palavras ("mais minutos nos próximos jogos");
+se não prometer nada, deixe "promessa" vazio. Em "promessas_do_professor" estão as que ele já fez, com o que
+aconteceu nos jogos depois ("desde_entao"): reconheça a que está sendo cumprida e cobre, com esses números, a que não
+está. Sem jogos do clube desde a promessa, ainda é cedo para cobrar.
+
 """ + REGRAS
 
 SISTEMA_AUXILIAR = """Você é o auxiliar técnico do clube numa carreira de Master League do PES, conversando com o \
@@ -31,6 +37,8 @@ Sugira caminhos, mas a decisão é do treinador.
 """ + REGRAS
 
 ESQUEMA = {"type": "OBJECT", "properties": {"resposta": {"type": "STRING"}}, "required": ["resposta"]}
+ESQUEMA_JOGADOR = {"type": "OBJECT", "properties": {"resposta": {"type": "STRING"}, "promessa": {"type": "STRING"}},
+                   "required": ["resposta"]}
 
 
 def _seis_meses(ate: str) -> str:
@@ -83,11 +91,13 @@ def contatos(con: sqlite3.Connection, cid: int) -> list[dict]:
     ultima = {r[0]: r[1] for r in con.execute(
         "SELECT contato, texto FROM mensagem m WHERE carreira_id = ? AND ordem = (SELECT max(ordem) FROM mensagem "
         "WHERE carreira_id = m.carreira_id AND contato = m.contato)", (cid,))}
+    prometidos = {r[0] for r in con.execute("SELECT player_id FROM promessa WHERE carreira_id = ?", (cid,))}
     lista = [{"contato": "auxiliar", "nome": "Auxiliar técnico", "sinais": [], "ultima": ultima.get("auxiliar")}]
     for l in banco.elenco_para_conversa(con, cid):
         c = str(l["player_id"])
         lista.append({"contato": c, "player_id": l["player_id"], "nome": l["nome"], "posicao": l["posicao"],
-                      "idade": l["idade"], "sinais": sinais(l, jogos, s["data_jogo"], abertas), "ultima": ultima.get(c)})
+                      "idade": l["idade"], "ultima": ultima.get(c),
+                      "sinais": sinais(l, jogos, s["data_jogo"], abertas) + ["promessa feita"] * (l["player_id"] in prometidos)})
     return lista
 
 
@@ -142,9 +152,10 @@ def responder(con: sqlite3.Connection, cid: int, contato: str, texto: str) -> di
     if fatos is None:
         return None
     anteriores = _mensagens(con, cid, contato)[-HISTORICO:]
-    r = ia.responder(SISTEMA_AUXILIAR if contato == "auxiliar" else SISTEMA_JOGADOR,
+    auxiliar = contato == "auxiliar"
+    r = ia.responder(SISTEMA_AUXILIAR if auxiliar else SISTEMA_JOGADOR,
                      {"fatos": fatos, "conversa_ate_agora": [{"autor": m["autor"], "texto": m["texto"]} for m in anteriores],
-                      "mensagem_do_treinador": texto}, ESQUEMA)
+                      "mensagem_do_treinador": texto}, ESQUEMA if auxiliar else ESQUEMA_JOGADOR)
     resposta = str(r.get("resposta", "")).strip()
     if not resposta:
         raise ia.IAIndisponivel("A resposta veio vazia. Tente de novo.")
@@ -156,4 +167,8 @@ def responder(con: sqlite3.Connection, cid: int, contato: str, texto: str) -> di
         con.executemany("INSERT INTO mensagem VALUES(?, ?, ?, ?, ?, ?, ?)",
                         [(cid, contato, ordem, "tecnico", texto, data_jogo, agora),
                          (cid, contato, ordem + 1, "contato", resposta, data_jogo, agora)])
+        if not auxiliar and (promessa := str(r.get("promessa") or "").strip()):
+            con.execute("INSERT INTO promessa SELECT ?, ?, coalesce(max(ordem), -1) + 1, ?, ?, ? FROM promessa "
+                        "WHERE carreira_id = ? AND player_id = ?", (cid, int(contato), promessa, data_jogo, agora,
+                                                                     cid, int(contato)))
     return conversa(con, cid, contato)

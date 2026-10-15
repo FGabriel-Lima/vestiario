@@ -1466,6 +1466,21 @@ function Conversa({ id, contato, onVoltar, onMudou }) {
           <p className="truncate font-kit text-sm uppercase tracking-wide text-muted">{numeros.filter(Boolean).join(" · ")}</p>
         </div>
       </header>
+      {c.fatos.promessas_do_professor?.length > 0 && (
+        <ul aria-label="Promessas feitas" className="space-y-1 border-b border-pitch-800 bg-pitch-950/60 px-4 py-2 text-sm">
+          {c.fatos.promessas_do_professor.map((p) => (
+            <li key={p.feita_em + p.promessa} className="flex items-baseline gap-2">
+              <span aria-hidden="true" className="icone text-base text-gold">handshake</span>
+              <span className="min-w-0">
+                <span className="font-semibold">{p.promessa}</span>
+                <span className="text-muted">
+                  {" "}· prometido em {dataBR(p.feita_em)} · depois disso: {p.desde_entao.jogos_do_clube} jogo{p.desde_entao.jogos_do_clube === 1 ? "" : "s"} do clube, {p.desde_entao.minutos} min dele
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <ol aria-live="polite" className="flex-1 space-y-3 overflow-y-auto px-4 py-5">
         {lista.length === 0 && !digitando && (

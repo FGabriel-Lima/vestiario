@@ -76,3 +76,27 @@ def test_contato_que_nao_e_do_elenco(con):
     assert conversas.conversa(con, 1, "999") is None
     with pytest.raises(ValueError):
         conversas.responder(con, 1, "10", "   ")
+
+
+def test_promessa_guardada_e_cobrada_com_os_jogos_depois_dela(con, monkeypatch):
+    recebido = []
+
+    def falso(sistema, fatos, esquema):
+        recebido.append(fatos)
+        return {"resposta": "Valeu, professor.", "promessa": "mais minutos nos próximos jogos" if len(recebido) == 1 else ""}
+
+    monkeypatch.setattr(ia, "responder", falso)
+    conversas.responder(con, 1, "11", "Você vai ter mais minutos.")
+    assert "promessa feita" in next(c for c in conversas.contatos(con, 1) if c["nome"] == "Reserva")["sinais"]
+    # o jogo de 10/03 vem depois da promessa (feita em 01/03): o Reserva jogou 20 minutos nele
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-20", [
+        partida("2026-02-01", 0, 1, (2, 0), [atuacao(10, 0, 2, 0, 90, 76), atuacao(11, 0, 0, 0, 10, None)]),
+        partida("2026-02-08", 1, 0, (0, 0), [atuacao(10, 1, 0, 0, 90, 60)]),
+        partida("2026-03-10", 0, 2, (1, 0), [atuacao(10, 0, 1, 0, 90, 70), atuacao(11, 0, 0, 0, 20, 58)]),
+    ], elenco=(10, 11, 12)), AGORA)
+    conversas.responder(con, 1, "11", "E aí?")
+    assert recebido[-1]["fatos"]["promessas_do_professor"] == [{
+        "promessa": "mais minutos nos próximos jogos", "feita_em": "2026-03-01",
+        "desde_entao": {"jogos_do_clube": 1, "jogos": 1, "minutos": 20, "nota_media": 5.8}}]
+    assert len(banco.promessas(con, 1, 11)) == 1  # promessa vazia não é guardada
+    assert "promessas_do_professor" not in banco.fatos_do_jogador(con, 1, 10)
