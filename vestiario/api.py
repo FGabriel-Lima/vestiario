@@ -25,14 +25,16 @@ TAILSCALE = ipaddress.ip_network("100.64.0.0/10")
 
 
 def _ip_conhecido(texto: str) -> bool:
-    """O próprio PC, um aparelho da conta Tailscale do usuário ou os IPs de VESTIARIO_REDE_IPS (o PC e o celular
-    quando o PC está no roteador do celular; veja __main__.py). O resto do Wi-Fi não entra: numa rede compartilhada
+    """O próprio PC, um aparelho da conta Tailscale do usuário, os IPs de VESTIARIO_REDE_IPS (o PC e o celular
+    quando o PC está no roteador do celular) ou a rede de VESTIARIO_REDE_PRIVADA (veja __main__.py). O resto do Wi-Fi não entra: numa rede compartilhada
     (o eduroam), qualquer um abriria o Vestiário e gastaria a chave do Gemini."""
     try:
         ip = ipaddress.ip_address(texto.strip("[]"))
     except ValueError:
         return False
-    return ip.is_loopback or ip in TAILSCALE or str(ip) in os.environ.get("VESTIARIO_REDE_IPS", "").split(",")
+    subrede = os.environ.get("VESTIARIO_REDE_PRIVADA")  # a rede de casa, marcada como Privada no Windows
+    return (ip.is_loopback or ip in TAILSCALE or str(ip) in os.environ.get("VESTIARIO_REDE_IPS", "").split(",")
+            or (subrede is not None and ip in ipaddress.ip_network(subrede)))
 
 
 @app.middleware("http")

@@ -1,6 +1,7 @@
 """python -m vestiario [--rede]: sobe o servidor local e abre o navegador. Se ele já estiver aberto, só abre o
 navegador. Com --rede, o servidor também atende o celular: pelo Tailscale, ou direto quando o PC está no roteador
-do celular (aí o celular é o gateway da rede, e só ele é liberado, além do PC). A API recusa o resto da rede."""
+do celular (aí o celular é o gateway da rede, e só ele é liberado, além do PC), ou na rede de casa, se ela estiver
+marcada como Privada no Windows (decisão do usuário). Numa rede Pública (o eduroam), a API recusa o resto da rede."""
 import ipaddress
 import re
 import subprocess
@@ -35,6 +36,19 @@ def rota_padrao() -> tuple[str, str] | None:
     return (m.group(2), m.group(1)) if m else None
 
 
+def rede_privada() -> str | None:
+    """A sub-rede da conexão com a internet, se o Windows a marca como Privada (ex.: "192.168.0.0/24")."""
+    comando = ("$p = Get-NetConnectionProfile | Where-Object IPv4Connectivity -eq 'Internet' | Select-Object -First 1; "
+               "if ($p.NetworkCategory -eq 'Private') { $i = Get-NetIPAddress -InterfaceIndex $p.InterfaceIndex "
+               "-AddressFamily IPv4 | Select-Object -First 1; \"$($i.IPAddress)/$($i.PrefixLength)\" }")
+    try:
+        saida = subprocess.run(["powershell", "-NoProfile", "-Command", comando], capture_output=True, text=True,
+                               timeout=20).stdout.strip()
+        return str(ipaddress.ip_interface(saida).network) if saida else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
 with socket.socket() as s:
     ja_aberto = s.connect_ex((URL_HOST, PORTA)) == 0
 
@@ -50,6 +64,8 @@ else:
             # ponytail: só o gateway entra; num Wi-Fi de casa o celular não é o gateway e precisa do Tailscale
             os.environ["VESTIARIO_REDE_IPS"] = ",".join(rota)
             os.environ.setdefault("VESTIARIO_REDE_URL", f"http://{rota[0]}:{PORTA}")
+        if subrede := rede_privada():
+            os.environ["VESTIARIO_REDE_PRIVADA"] = subrede
         print(f"No celular: {os.environ.get('VESTIARIO_REDE_URL', 'sem rede')}")
     threading.Timer(1.5, webbrowser.open, [URL]).start()
     uvicorn.run(app, host=host, port=PORTA)

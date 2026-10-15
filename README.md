@@ -76,6 +76,9 @@ Sem Tailscale, também funciona com o PC conectado ao roteador do próprio celul
 e o Vestiário libera só ele. A tela inicial mostra o endereço (`http://<IP do PC>:8765`). Na primeira vez, o Windows
 pergunta se o Python pode receber conexões: permita.
 
+No Wi-Fi de casa, marque a rede como **Privada** no Windows (Configurações > Rede e Internet > Wi-Fi > a sua rede >
+Tipo de perfil de rede: Privada) e abra o Vestiário de novo: aí ele aceita os aparelhos dessa rede.
+
 Fora isso, o Vestiário só aceita o próprio PC e os aparelhos da sua conta Tailscale. Ele não abre para o resto do Wi-Fi: numa
 rede compartilhada (como o eduroam), qualquer pessoa conseguiria abrir as suas carreiras e usar a sua chave do Gemini.
 
