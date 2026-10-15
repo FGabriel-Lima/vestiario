@@ -827,14 +827,18 @@ function Transferencias({ id }) {
   if (!t) return null;
   if (t.janelas.length === 0) {
     return (
+      <>
+      <Propostas lista={t.propostas} />
       <p className="max-w-xl text-muted">
         Nenhuma mudança no elenco{t.primeira && ` desde ${dataBR(t.primeira)}`}. Depois da próxima janela de
         transferências no jogo, salve e sincronize: quem chegou e quem saiu aparece aqui, com clube e valor.
       </p>
+      </>
     );
   }
   return (
     <>
+      <Propostas lista={t.propostas} />
       <p className="mb-8 max-w-xl text-muted">
         O elenco de cada data do jogo sincronizada, comparado com o da data anterior. Os números são pelo clube, na
         carreira toda.
@@ -881,6 +885,105 @@ function Transferencias({ id }) {
 
 // Quem chegou vem "de" um clube, quem saiu vai "para" outro. Sem o clube conhecido (sincronização anterior a esta
 // versão, com o save já sobrescrito), a linha some.
+// Propostas de outros clubes pelos jogadores do clube. A régua compara a oferta com o valor de mercado, que é a
+// pergunta de quem decide: estão pagando mais ou menos do que ele vale?
+function Propostas({ lista }) {
+  if (!lista?.length) return null;
+  const abertas = lista.filter((p) => p.situacao === "aberta");
+  const antigas = lista.filter((p) => p.situacao !== "aberta");
+  return (
+    <section className="mb-14" aria-labelledby="propostas">
+      <h2 id="propostas" className="mb-1 font-kit text-3xl font-semibold uppercase">
+        Propostas recebidas
+      </h2>
+      <p className="mb-5 max-w-2xl text-sm text-muted">
+        Ofertas de outros clubes pelos seus jogadores. Responda no PES; aqui fica o histórico.
+      </p>
+      {abertas.length > 0 ? (
+        <ul className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          {abertas.map((p) => (
+            <li key={`${p.player_id}-${p.clube.nome}-${p.valor}`}>
+              <CartaDeProposta p={p} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted">Nenhuma proposta aberta no último save.</p>
+      )}
+      {antigas.length > 0 && (
+        <>
+          <h3 className="mb-2 mt-8 font-kit text-xl font-semibold uppercase text-muted">Anteriores</h3>
+          <ul className="divide-y divide-pitch-800">
+            {antigas.map((p) => (
+              <li key={`${p.player_id}-${p.clube.nome}-${p.valor}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-muted">
+                <Escudo id={p.clube.escudo} nome={p.clube.nome ?? "?"} className="size-5" />
+                <span className="min-w-0 truncate">
+                  {p.clube.nome} por <span className="text-chalk">{p.nome}</span>
+                </span>
+                <Dinheiro valor={p.valor} className="font-kit text-lg text-chalk" />
+                <span className="text-sm">{p.situacao === "saiu" ? "· o jogador saiu do clube" : "· recusada ou expirou"}</span>
+                <span className="ml-auto text-sm">até {dataBR(p.ultima)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CartaDeProposta({ p }) {
+  const diferenca = p.valor_mercado ? (p.valor - p.valor_mercado) / p.valor_mercado : null;
+  // régua: o traço de giz é o valor de mercado; a barra vai até a oferta (no máximo o dobro do valor)
+  const escala = p.valor_mercado ? Math.max(p.valor, p.valor_mercado) * 1.15 : null;
+  const acima = diferenca !== null && diferenca >= 0;
+  return (
+    <article className="rounded-md bg-pitch-900 p-5">
+      <header className="flex items-center gap-3">
+        <Escudo id={p.clube.escudo} nome={p.clube.nome ?? "?"} className="size-10 drop-shadow-lg" />
+        <p className="min-w-0 font-kit text-lg uppercase leading-tight text-muted">
+          <span className="block truncate text-2xl font-bold text-chalk">{p.clube.nome}</span>
+          quer
+        </p>
+        <span className="ml-auto flex min-w-0 items-center gap-2">
+          <Rosto id={p.player_id} className="size-10" />
+          <span className="min-w-0">
+            <span className="block truncate font-semibold">{p.nome}</span>
+            <Posicao codigo={p.posicao} className="w-9 py-0 text-xs" />
+          </span>
+        </span>
+      </header>
+
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-x-4">
+        <Dinheiro valor={p.valor} className="font-kit text-4xl font-extrabold text-gold" />
+        {p.valor_mercado && (
+          <span className="text-sm text-muted">
+            valor de mercado <Dinheiro valor={p.valor_mercado} className="text-chalk" />
+          </span>
+        )}
+      </div>
+      {escala && (
+        <div className="mt-3">
+          <div className="relative h-2.5 rounded-full bg-pitch-800" aria-hidden="true">
+            <div
+              className={`absolute inset-y-0 left-0 rounded-full ${acima ? "bg-neon" : "bg-cartao"}`}
+              style={{ width: `${(p.valor / escala) * 100}%` }}
+            />
+            <div className="absolute -inset-y-1.5 w-0.5 bg-chalk/80" style={{ left: `${(p.valor_mercado / escala) * 100}%` }} />
+          </div>
+          <p className={`mt-2 text-sm font-semibold ${acima ? "text-neon" : "text-cartao"}`}>
+            {Math.abs(Math.round(diferenca * 100))}% {acima ? "acima" : "abaixo"} do valor de mercado
+          </p>
+        </div>
+      )}
+      <footer className="mt-4 flex items-center gap-2 border-t border-pitch-800 pt-3 text-sm text-muted">
+        <span className="size-2 rounded-full bg-neon" aria-hidden="true" />
+        Aberta · no save desde {dataBR(p.primeira)}
+      </footer>
+    </article>
+  );
+}
+
 function Movimento({ titulo, icone, cor, jogadores, clubeConhecido, saiu = false }) {
   return (
     <div className="rounded-md bg-pitch-900 p-5">

@@ -523,3 +523,17 @@ def test_liga_com_rodadas_que_sairam_do_save():
     parte += [jogo(5, 2, 0, 3), jogo(6, 2, 1, 2)]  # turno completo: nada falta
     (fase,) = banco._fases([parte])
     assert (fase["rodadas_jogadas"], fase["rodadas_total"], fase["incompleta"]) == (3, 3, False)
+
+
+
+def test_propostas_recebidas(con):
+    banco.gravar_nomes(con, {10: "Zagueiro", 11: "Volante", 12: "Vendido"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-14", elenco=(10, 11, 12), valores={10: 8000},
+                                               propostas=[(1, 10, 8320), (2, 11, 5200), (2, 12, 3000)]), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-20", elenco=(10, 11), valores={10: 8000},
+                                               propostas=[(1, 10, 8320)]), AGORA)
+    ps = {p["nome"]: p for p in banco.transferencias(con, 1)["propostas"]}
+    assert (ps["Zagueiro"]["clube"]["nome"], ps["Zagueiro"]["valor"], ps["Zagueiro"]["valor_mercado"]) == (
+        "Clube B", 8320 * MOEDA, 8000 * MOEDA)
+    assert {n: p["situacao"] for n, p in ps.items()} == {"Zagueiro": "aberta", "Volante": "encerrada", "Vendido": "saiu"}
+    assert (ps["Volante"]["primeira"], ps["Volante"]["ultima"]) == ("2026-01-14", "2026-01-14")

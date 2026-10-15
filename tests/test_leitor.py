@@ -6,7 +6,7 @@ import pytest
 
 from vestiario.leitor import (ELENCO, LIVRO0, LIVRO_N, LIVRO_TAM, MOEDA, PARTIDA0, PARTIDA_TAM, PARTIDAS, TIME_ID,
                               TIME_TAM, VAZIO, BLOCO0, COMPETICAO_TAM, COMPETICOES0, FormatoInvalido, ler_competicoes,
-                              ler_bloco, ler_contratos, ler_descricao, ler_elenco, ler_ids, ler_negocios, ler_partidas)
+                              contratos_e_carreira, ler_bloco, ler_contratos, ler_descricao, ler_elenco, ler_ids, ler_propostas, ler_negocios, ler_partidas)
 
 
 def tabela_vazia() -> bytearray:
@@ -237,3 +237,20 @@ def test_proposta_de_outro_clube_nao_substitui_o_contrato():
     data = b"\x1b" * 5 + contrato + outro + bytes(48) * 33 + proposta
     c = ler_contratos(data, [47128, 50000])
     assert (c[47128].multa, c[47128].salario_anual) == (10160, 16182)
+
+
+def registro_de_proposta(clube, pid, valor, carreira=bytes.fromhex("83c03901")) -> bytes:
+    """Tabela de propostas (60 bytes): u16 clube (com flags), …, id da carreira em +24, vaga, player_id, valor 2×."""
+    r = struct.pack("<HH", 0xC000 | clube, 312) + b"\xff" * 20 + carreira + struct.pack("<IIII", 0x0E70, pid, valor, valor)
+    return r + bytes(20)
+
+
+def test_propostas_recebidas():
+    tabela = registro_de_contrato(0x0F9B, 47128, 16182, 10160, (2027, 1, 31), (2026, 1, 1))
+    propostas = registro_de_proposta(1, 47128, 8320) + registro_de_proposta(2, 130039, 5200)
+    data = b"\x1b" * 3 + tabela + bytes(500) + propostas
+    contratos, carreira = contratos_e_carreira(data, [47128, 130039])
+    assert [(p.clube, p.player_id, p.valor) for p in ler_propostas(data, carreira, 3, [47128, 130039])] == [
+        (1, 47128, 8320), (2, 130039, 5200)]
+    assert ler_propostas(data, (bytes.fromhex("01020304"), carreira[1]), 3, [47128, 130039]) == []
+    assert ler_propostas(data, carreira, 3, [47128]) == [ler_propostas(data, carreira, 3, [47128, 130039])[0]]

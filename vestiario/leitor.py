@@ -59,6 +59,13 @@ class Contrato:
 
 
 @dataclass
+class Proposta:
+    clube: int                       # índice do clube que fez a proposta
+    player_id: int
+    valor: int                       # × MOEDA = R$
+
+
+@dataclass
 class Partida:
     data: date
     mandante: int
@@ -92,6 +99,7 @@ class Save:
     idades: dict[int, int] = field(default_factory=dict)  # player_id → idade atual na ML
     valores: dict[int, int] = field(default_factory=dict)  # player_id → valor de mercado (× MOEDA = R$)
     competicoes: dict[int, str] = field(default_factory=dict)  # id → nome
+    propostas: list[Proposta] = field(default_factory=list)  # propostas de outros clubes por jogadores do clube
 
 
 def _cstr(b: bytes, o: int = 0) -> str:
@@ -155,6 +163,10 @@ def _data(data: bytes, o: int) -> date | None:
 
 
 def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
+    return contratos_e_carreira(data, elenco)[0]
+
+
+def contratos_e_carreira(data: bytes, elenco: list[int]) -> tuple[dict[int, Contrato], tuple[bytes, int] | None]:
     """Registros de 48 bytes fora de alinhamento: (u32 vaga, u32 player_id, u32 salário anual, u32 multa, data do fim,
     u32, 4 bytes do id da carreira, u32, data, …, 8 × 0xFF em +38). A tabela muda de lugar entre saves, então cada
     jogador do elenco é achado pelo formato do registro. O id da carreira é o mesmo em quase todos e confirma a tabela;
@@ -170,7 +182,7 @@ def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
                 candidatos.append((o, data[o + 24:o + 28], pid, Contrato(anual, multa, fim)))
             p = data.find(alvo, p + 1)
     if not candidatos:
-        return {}
+        return {}, None
     carreira = Counter(c[1] for c in candidatos).most_common(1)[0][0]
     base = min(o for o, chave, *_ in candidatos if chave == carreira)
     contratos = {pid: c for o, chave, pid, c in candidatos if chave == carreira}
@@ -190,7 +202,28 @@ def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
                 contratos[pid] = Contrato(0, 0, fim, emprestimo=True)
                 break
             p = data.find(struct.pack("<I", pid), p + 1)
-    return contratos
+    return contratos, (carreira, base)
+
+
+def ler_propostas(data: bytes, carreira: tuple[bytes, int] | None, n_times: int, elenco: list[int]) -> list[Proposta]:
+    """Propostas de outros clubes por jogadores do clube (tela de negociações): registros de 60 bytes perto da
+    tabela de contratos, (u16 clube com flags, …, id da carreira em +24, vaga, player_id, valor, valor). Conferido
+    com Flamengo → Tolói e Estoril → Sabino na Liga Master 04."""
+    if not carreira:
+        return []
+    chave, base = carreira
+    propostas = []
+    o = data.find(chave, max(24, base - 200_000))
+    while o != -1 and o < base + 400_000:
+        r = o - 24
+        clube = struct.unpack_from("<H", data, r)[0] & INDEFINIDO
+        pid = struct.unpack_from("<I", data, r + 32)[0] & PID
+        valor, repetido = struct.unpack_from("<II", data, r + 36)
+        # só jogadores do elenco: o id da carreira também aparece em outros registros que não são propostas
+        if clube < n_times and pid in elenco and 0 < valor == repetido:
+            propostas.append(Proposta(clube, pid, valor))
+        o = data.find(chave, o + 1)
+    return propostas
 
 
 def ler_bloco(data: bytes) -> tuple[dict[int, int], dict[int, int]]:
@@ -263,6 +296,8 @@ def ler_save(raw: bytes) -> Save:
         raise FormatoInvalido(f"clube {clube!r} não está na tabela de times")
     idx = times.index(clube)
     elencos = [ler_elenco(data, i) for i in range(len(times))]
+    contratos, carreira = contratos_e_carreira(data, elencos[idx])
     return Save(nome, clube, data_jogo, times, idx, elencos[idx], ler_partidas(data, len(times)),
-                ler_ids(data, len(times)), elencos, ler_negocios(data), ler_contratos(data, elencos[idx]),
-                struct.unpack_from("<I", data, ORCAMENTO)[0], *ler_bloco(data), ler_competicoes(data))
+                ler_ids(data, len(times)), elencos, ler_negocios(data), contratos,
+                struct.unpack_from("<I", data, ORCAMENTO)[0], *ler_bloco(data), ler_competicoes(data),
+                ler_propostas(data, carreira, len(times), elencos[idx]))

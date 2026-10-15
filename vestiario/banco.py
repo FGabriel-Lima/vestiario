@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS contrato(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL,
   salario_anual INTEGER NOT NULL, multa INTEGER NOT NULL, fim TEXT NOT NULL, emprestimo INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(sincronizacao_id, player_id));
+-- propostas de outros clubes por jogadores do clube, com a primeira e a última data do jogo em que apareceram
+CREATE TABLE IF NOT EXISTS proposta(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, clube_idx INTEGER NOT NULL,
+  valor INTEGER NOT NULL, primeira TEXT NOT NULL, ultima TEXT NOT NULL, PRIMARY KEY(carreira_id, player_id, clube_idx, valor));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
@@ -61,7 +65,7 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     tabelas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     con.executescript(ESQUEMA)
-    if tabelas and not {"vinculo", "negocio", "contrato"} <= tabelas:
+    if tabelas and not {"vinculo", "negocio", "contrato", "proposta"} <= tabelas:
         with con:  # banco anterior a origem e destino, valores ou contratos: relê os saves que ainda existem
             con.execute("DELETE FROM arquivo")
     if "posicao" not in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}:
@@ -157,6 +161,10 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
             for pid in pids:
                 clube_de.setdefault(pid, idx)  # na tabela de times os clubes vêm antes das seleções
         con.executemany("INSERT INTO vinculo VALUES(?, ?, ?)", [(sid, p, i) for p, i in clube_de.items()])
+        con.executemany("INSERT INTO proposta VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE "
+                        "SET primeira = min(primeira, excluded.primeira), ultima = max(ultima, excluded.ultima)",
+                        [(cid, p.player_id, p.clube, p.valor, save.data_jogo.isoformat(), save.data_jogo.isoformat())
+                         for p in save.propostas])
         con.executemany("INSERT INTO negocio VALUES(?, ?, ?, ?, ?) ON CONFLICT DO UPDATE "
                         "SET data_jogo = min(data_jogo, excluded.data_jogo)",
                         [(cid, n.player_id, n.tipo, n.valor, save.data_jogo.isoformat()) for n in save.negocios])
@@ -455,7 +463,26 @@ def transferencias(con: sqlite3.Connection, cid: int) -> dict:
         if antes != depois:
             chegaram, sairam = depois - antes, antes - depois
             janelas.append(janela(de, ate, chegaram, sairam, clubes(s_antes, chegaram), clubes(s_depois, sairam), s_antes))
-    return {"primeira": fotos[0][0] if fotos else None, "janelas": janelas[::-1]}
+    return {"primeira": fotos[0][0] if fotos else None, "janelas": janelas[::-1], "propostas": propostas(con, cid)}
+
+
+def propostas(con: sqlite3.Connection, cid: int) -> list[dict]:
+    """Propostas recebidas, da mais recente para a mais antiga. Aberta = ainda no save mais recente; saiu = o
+    jogador não está mais no elenco; encerrada = recusada ou expirou (o save não diz qual)."""
+    s = _ultima(con, cid)
+    elenco = {r[0]: r[1] for r in con.execute("SELECT player_id, valor FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
+    lista = []
+    for r in con.execute(
+            "SELECT p.player_id, coalesce(j.nome, 'Jogador #' || p.player_id) AS nome, j.posicao, p.valor, p.primeira,"
+            " p.ultima, t.nome AS clube, t.pes_id AS escudo FROM proposta p LEFT JOIN jogador j ON j.player_id = p.player_id"
+            " LEFT JOIN time t ON t.carreira_id = p.carreira_id AND t.idx = p.clube_idx WHERE p.carreira_id = ?"
+            " ORDER BY p.ultima DESC, p.valor DESC", (cid,)):
+        situacao = "aberta" if r["ultima"] == s["data_jogo"] else "saiu" if r["player_id"] not in elenco else "encerrada"
+        mercado = elenco.get(r["player_id"])
+        lista.append({"player_id": r["player_id"], "nome": r["nome"], "posicao": r["posicao"], "valor": r["valor"] * MOEDA,
+                      "valor_mercado": mercado * MOEDA if mercado else None, "primeira": r["primeira"],
+                      "ultima": r["ultima"], "situacao": situacao, "clube": {"nome": r["clube"], "escudo": r["escudo"]}})
+    return lista
 
 
 # ponytail: temporada = ano civil e todas as competições somadas; separar quando o campo de competição sair.
