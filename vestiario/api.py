@@ -128,6 +128,22 @@ def get_mundo(cid: int, ano: int):
         return banco.mundo(con, cid, ano)
 
 
+@app.get("/api/carreiras/{cid}/campeonatos")
+def get_campeonatos(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return banco.edicoes(con, cid)
+
+
+@app.get("/api/carreiras/{cid}/campeonato")
+def get_campeonato(cid: int, chave: str):
+    with _con() as con:
+        _carreira(con, cid)
+        if (e := banco.edicao(con, cid, chave)) is None:
+            raise HTTPException(404, "Campeonato não encontrado")
+        return e
+
+
 @app.get("/api/carreiras/{cid}/lendas")
 def get_lendas(cid: int):
     with _con() as con:

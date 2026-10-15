@@ -1,6 +1,8 @@
 """SQLite do Vestiário: guarda a história que o save vai apagando."""
 import sqlite3
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime
+from itertools import groupby
 from pathlib import Path
 
 from .leitor import MOEDA, Save
@@ -13,7 +15,7 @@ CREATE TABLE IF NOT EXISTS sincronizacao(
   em TEXT NOT NULL, data_jogo TEXT NOT NULL, clube_idx INTEGER NOT NULL, clube_nome TEXT NOT NULL,
   orcamento INTEGER);
 CREATE TABLE IF NOT EXISTS elenco(
-  sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL);
+  sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, idade INTEGER);
 -- clube de cada jogador do mundo naquela sincronização (origem e destino das transferências)
 CREATE TABLE IF NOT EXISTS vinculo(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, time_idx INTEGER NOT NULL,
@@ -37,8 +39,10 @@ CREATE TABLE IF NOT EXISTS partida(
   mandante_idx INTEGER NOT NULL, visitante_idx INTEGER NOT NULL,
   gols_mandante INTEGER NOT NULL, gols_visitante INTEGER NOT NULL,
   penaltis_mandante INTEGER NOT NULL, penaltis_visitante INTEGER NOT NULL,
-  disputada INTEGER NOT NULL,
+  disputada INTEGER NOT NULL, competicao INTEGER, grupo INTEGER NOT NULL DEFAULT 0, rodada INTEGER NOT NULL DEFAULT 0,
   UNIQUE(carreira_id, data, mandante_idx, visitante_idx));
+CREATE TABLE IF NOT EXISTS competicao(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, id INTEGER NOT NULL, nome TEXT NOT NULL, PRIMARY KEY(carreira_id, id));
 CREATE TABLE IF NOT EXISTS escalacao(
   partida_id INTEGER NOT NULL REFERENCES partida ON DELETE CASCADE, player_id INTEGER NOT NULL,
   lado INTEGER NOT NULL, gols INTEGER NOT NULL, assistencias INTEGER NOT NULL);
@@ -60,6 +64,16 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
             con.execute("DELETE FROM arquivo")
     if "posicao" not in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}:
         con.execute("ALTER TABLE jogador ADD COLUMN posicao INTEGER")  # preenchida na próxima sincronização
+    if "competicao" not in {r[1] for r in con.execute("PRAGMA table_info(partida)")}:
+        with con:  # banco anterior às competições: relê os saves para preencher as partidas que ainda estão neles
+            con.execute("ALTER TABLE partida ADD COLUMN competicao INTEGER")
+            con.execute("ALTER TABLE partida ADD COLUMN grupo INTEGER NOT NULL DEFAULT 0")
+            con.execute("ALTER TABLE partida ADD COLUMN rodada INTEGER NOT NULL DEFAULT 0")
+            con.execute("DELETE FROM arquivo")
+    if "idade" not in {r[1] for r in con.execute("PRAGMA table_info(elenco)")}:
+        with con:  # banco anterior às idades da ML: relê os saves para preenchê-las
+            con.execute("ALTER TABLE elenco ADD COLUMN idade INTEGER")
+            con.execute("DELETE FROM arquivo")
     if "orcamento" not in {r[1] for r in con.execute("PRAGMA table_info(sincronizacao)")}:
         with con:  # banco anterior ao orçamento: relê os saves para preenchê-lo
             con.execute("ALTER TABLE sincronizacao ADD COLUMN orcamento INTEGER")
@@ -120,7 +134,7 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
             (cid, em.isoformat(timespec="seconds"), save.data_jogo.isoformat(), save.clube_idx, save.clube,
              save.orcamento),
         ).fetchone()[0]
-        con.executemany("INSERT INTO elenco VALUES(?, ?)", [(sid, p) for p in save.elenco])
+        con.executemany("INSERT INTO elenco VALUES(?, ?, ?)", [(sid, p, save.idades.get(p)) for p in save.elenco])
         con.executemany("INSERT INTO contrato VALUES(?, ?, ?, ?, ?)",
                         [(sid, p, c.salario_anual, c.multa, c.fim.isoformat()) for p, c in save.contratos.items()])
         # só a sincronização mais recente de cada data do jogo guarda os vínculos (são ~18 mil por save)
@@ -144,11 +158,18 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
         if mais_recente:
             con.execute("DELETE FROM partida WHERE carreira_id = ? AND disputada = 0", (cid,))
 
+        con.executemany("INSERT INTO competicao VALUES(?, ?, ?) ON CONFLICT DO UPDATE SET nome = excluded.nome",
+                        [(cid, i, n) for i, n in save.competicoes.items()])
         novas = atualizadas = 0
         for p in save.partidas:
             chave = (p.data.isoformat(), p.mandante, p.visitante)
             antes = existentes.get(chave)
-            if antes == 1 or (not p.disputada and not mais_recente):
+            if antes == 1:  # disputada nunca regride; só ganha a competição se foi gravada antes de existir o campo
+                con.execute("UPDATE partida SET competicao = ?, grupo = ?, rodada = ? WHERE carreira_id = ? AND data = ?"
+                            " AND mandante_idx = ? AND visitante_idx = ? AND competicao IS NULL",
+                            (p.competicao, p.grupo, p.rodada, cid, *chave))
+                continue
+            if not p.disputada and not mais_recente:
                 continue
             if p.disputada and antes == 0:
                 atualizadas += 1
@@ -156,12 +177,14 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
                 novas += 1
             pid = con.execute(
                 "INSERT INTO partida(carreira_id, data, mandante_idx, visitante_idx, gols_mandante, gols_visitante,"
-                " penaltis_mandante, penaltis_visitante, disputada) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " penaltis_mandante, penaltis_visitante, disputada, competicao, grupo, rodada)"
+                " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(carreira_id, data, mandante_idx, visitante_idx) DO UPDATE SET"
                 " gols_mandante = excluded.gols_mandante, gols_visitante = excluded.gols_visitante,"
                 " penaltis_mandante = excluded.penaltis_mandante, penaltis_visitante = excluded.penaltis_visitante,"
-                " disputada = excluded.disputada RETURNING id",
-                (cid, *chave, *p.gols, *p.penaltis, int(p.disputada)),
+                " disputada = excluded.disputada, competicao = excluded.competicao, grupo = excluded.grupo,"
+                " rodada = excluded.rodada RETURNING id",
+                (cid, *chave, *p.gols, *p.penaltis, int(p.disputada), p.competicao, p.grupo, p.rodada),
             ).fetchone()[0]
             con.execute("DELETE FROM escalacao WHERE partida_id = ?", (pid,))
             con.executemany("INSERT INTO escalacao VALUES(?, ?, ?, ?, ?)",
@@ -212,10 +235,12 @@ def temporadas(con: sqlite3.Connection, cid: int) -> list[int]:
 _PARTIDA = (
     "SELECT p.id, p.data, p.mandante_idx, tm.nome AS mandante, tm.pes_id AS mandante_escudo,"
     " p.visitante_idx, tv.nome AS visitante, tv.pes_id AS visitante_escudo,"
-    " p.gols_mandante, p.gols_visitante, p.penaltis_mandante, p.penaltis_visitante, p.disputada "
+    " p.gols_mandante, p.gols_visitante, p.penaltis_mandante, p.penaltis_visitante, p.disputada,"
+    " cp.nome AS competicao, p.competicao AS competicao_id, p.grupo, p.rodada "
     "FROM partida p "
     "LEFT JOIN time tm ON tm.carreira_id = p.carreira_id AND tm.idx = p.mandante_idx "
     "LEFT JOIN time tv ON tv.carreira_id = p.carreira_id AND tv.idx = p.visitante_idx "
+    "LEFT JOIN competicao cp ON cp.carreira_id = p.carreira_id AND cp.id = p.competicao "
 )
 
 
@@ -291,16 +316,17 @@ def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
     linhas = {r["player_id"]: dict(r) for r in con.execute(
         _ESTATS + "AND substr(p.data, 1, 4) = :ano GROUP BY e.player_id",
         {"cid": cid, "clube": s["clube_idx"], "ano": str(ano)})}
-    atuais = {r[0]: (r[1], r[2]) for r in con.execute(
-        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id), j.posicao FROM elenco e "
+    atuais = {r[0]: (r[1], r[2], r[3]) for r in con.execute(
+        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id), j.posicao, e.idade FROM elenco e "
         "LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.sincronizacao_id = ?", (s["id"],))}
-    for pid, (nome, posicao) in atuais.items() if ano == int(s["data_jogo"][:4]) else ():
+    for pid, (nome, posicao, _) in atuais.items() if ano == int(s["data_jogo"][:4]) else ():
         linhas.setdefault(pid, {"player_id": pid, "nome": nome, "posicao": posicao, "jogos": 0, "gols": 0,
                                 "assistencias": 0})
     contratos = _contratos(con, s["id"])
     for pid, linha in linhas.items():
         linha["no_elenco"] = pid in atuais
         linha["contrato"] = contratos.get(pid) if pid in atuais else None
+        linha["idade"] = atuais[pid][2] if pid in atuais else None
     return sorted(linhas.values(), key=lambda l: (-l["jogos"], l["nome"]))
 
 
@@ -451,3 +477,220 @@ def rostos(con: sqlite3.Connection) -> set[int]:
                 m = mundo(con, cid, ano)
                 ids |= {l["player_id"] for l in m["artilheiros"] + m["garcons"]}
     return ids
+
+
+# --- campeonatos ---------------------------------------------------------------
+
+MATA_MATA = 46        # rodadas a partir daqui são fases eliminatórias (53 = final)
+# edição nova: rodada que volta para trás depois de 45 dias sem jogo, ou qualquer pausa de mais de 120 dias
+# (fase preliminar e supercopa usam sempre a mesma rodada)
+PAUSA_ENTRE_EDICOES, PAUSA_LONGA = 45, 120
+# conferido em Copa do Brasil, Libertadores e AFC Champions League; as outras rodadas viram "Nª fase"
+FASES = {53: "Final", 52: "Semifinal", 51: "Quartas de final"}
+
+
+def _edicoes(con: sqlite3.Connection, cid: int) -> dict[str, dict]:
+    """Junta as partidas de cada competição em edições. O id da competição se repete a cada temporada, então uma
+    edição nova começa depois de uma pausa (veja PAUSA_LONGA). Ids diferentes com o mesmo nome
+    (a Libertadores tem um para os grupos e outro para o mata-mata) entram na mesma edição se o ano bater."""
+    por_id = {}
+    for p in con.execute(_PARTIDA + "WHERE p.carreira_id = ? AND p.competicao IS NOT NULL ORDER BY p.data", (cid,)):
+        por_id.setdefault(p["competicao_id"], []).append(dict(p))
+    edicoes = {}
+    for ps in por_id.values():
+        trechos = [[ps[0]]]
+        for anterior, p in zip(ps, ps[1:]):
+            pausa = (date.fromisoformat(p["data"]) - date.fromisoformat(anterior["data"])).days
+            if pausa > PAUSA_LONGA or (pausa > PAUSA_ENTRE_EDICOES and p["rodada"] < max(x["rodada"] for x in trechos[-1])):
+                trechos.append([])
+            trechos[-1].append(p)
+        for t in trechos:
+            inicio, fim = t[0]["data"][:4], t[-1]["data"][:4]
+            # ponytail: a Champions tem fases com ids que começam em anos diferentes e vira duas edições
+            temporada = inicio if inicio == fim else f"{inicio}/{fim[2:]}"
+            nome = t[0]["competicao"] or f"Competição {t[0]['competicao_id']}"
+            e = edicoes.setdefault(f"{nome}|{temporada}", {"nome": nome, "temporada": temporada, "partes": []})
+            e["partes"].append(t)
+    return edicoes
+
+
+def _fases(partes: list[list[dict]]) -> list[dict]:
+    fases, numero = [], 0
+    for parte in sorted(partes, key=lambda t: t[0]["data"]):
+        if any(p["rodada"] >= MATA_MATA for p in parte):
+            rodadas = sorted({p["rodada"] for p in parte})
+            for i, rodada in enumerate(rodadas):
+                jogos = [p for p in parte if p["rodada"] == rodada]
+                if any(p["grupo"] for p in jogos):  # a preliminar da Libertadores vem dividida em chaves, na rodada 53
+                    titulo = "Fase preliminar"
+                elif rodada in FASES:
+                    titulo = FASES[rodada]
+                elif i + 1 < len(rodadas) and rodadas[i + 1] == 51:
+                    titulo = "Oitavas de final"
+                else:
+                    numero += 1
+                    titulo = f"{numero}ª fase"
+                fases.append({"titulo": titulo, "tipo": "jogos", "partidas": jogos})
+        else:
+            grupos = [{"titulo": f"Grupo {chr(64 + g)}" if g else None,
+                       "linhas": _classificacao(_sem_avulsos([p for p in parte if p["grupo"] == g]) if g else
+                                                [p for p in parte if p["grupo"] == g])}
+                      for g in sorted({p["grupo"] for p in parte})]
+            # jogo remarcado deixa a numeração de rodada do PES fora de ordem; conta pelos jogos de quem mais jogou
+            fases.append({"titulo": "Fase de grupos" if grupos[0]["titulo"] else "Classificação", "tipo": "tabela",
+                          "rodadas_jogadas": max((l["jogos"] for g in grupos for l in g["linhas"]), default=0),
+                          "rodadas_total": len({p["rodada"] for p in parte}), "grupos": grupos})
+    return fases
+
+
+def _sem_avulsos(partidas: list[dict]) -> list[dict]:
+    """O save às vezes marca um jogo de outros times com o grupo (Buriram x Al Hussein no grupo A da Libertadores
+    2025). Time de verdade do grupo joga várias vezes; jogo em que nenhum dos dois tem outro jogo no grupo sai."""
+    vezes = Counter(t for p in partidas for t in (p["mandante_idx"], p["visitante_idx"]))
+    return [p for p in partidas if vezes[p["mandante_idx"]] > 1 or vezes[p["visitante_idx"]] > 1] or partidas
+
+
+def _classificacao(partidas: list[dict]) -> list[dict]:
+    """Classificação com posição (dividida em empate total). Os times entram pelos jogos marcados, mesmo sem ter jogado."""
+    linhas = {}
+    for p in partidas:
+        for lado in ("mandante", "visitante"):
+            linhas.setdefault(p[f"{lado}_idx"], {"idx": p[f"{lado}_idx"], "nome": p[lado], "escudo": p[f"{lado}_escudo"],
+                                                 "jogos": 0, "vitorias": 0, "empates": 0, "derrotas": 0,
+                                                 "gols_pro": 0, "gols_contra": 0, "pontos": 0})
+    for p in partidas:
+        if p["disputada"]:
+            for idx in (p["mandante_idx"], p["visitante_idx"]):
+                r = _campanha([p], idx)
+                linha = linhas[idx]
+                for k in ("jogos", "vitorias", "empates", "derrotas", "gols_pro", "gols_contra"):
+                    linha[k] += r[k]
+                linha["pontos"] += 3 * r["vitorias"] + r["empates"]
+    # critério da tela do PES (conferido no Brasileirão 2026): pontos, vitórias, saldo, gols pró e, entre os que
+    # continuam empatados, pontos nos jogos entre eles; quem empata em tudo divide a posição e o PES lista pelo id
+    # do time no jogo (o do escudo)
+    chave = lambda l: (-l["pontos"], -l["vitorias"], l["gols_contra"] - l["gols_pro"], -l["gols_pro"])
+    ordem = sorted(linhas.values(), key=lambda l: (chave(l), l["escudo"] if l["escudo"] is not None else 1 << 30,
+                                                   l["nome"] or ""))
+    resultado = []
+    for _, grupo in groupby(ordem, key=chave):
+        grupo = list(grupo)
+        empatados = {l["idx"] for l in grupo}
+        diretos = [p for p in partidas if p["disputada"] and {p["mandante_idx"], p["visitante_idx"]} <= empatados]
+        pontos = {idx: sum(3 * r["vitorias"] + r["empates"] for r in (_campanha([p], idx) for p in diretos
+                                                                       if idx in (p["mandante_idx"], p["visitante_idx"])))
+                  for idx in empatados}
+        resultado += [(l, pontos[l["idx"]]) for l in sorted(grupo, key=lambda l: -pontos[l["idx"]])]
+    for i, (l, diretos) in enumerate(resultado):
+        anterior, diretos_ant = resultado[i - 1] if i else (None, None)
+        divide = anterior and chave(anterior) == chave(l) and diretos == diretos_ant and             _pontos_diretos(partidas, anterior, l) == (0, 0)
+        l["posicao"] = anterior["posicao"] if divide else i + 1
+    return [l for l, _ in resultado]
+
+
+def _pontos_diretos(partidas: list[dict], a: dict, b: dict) -> tuple[int, int]:
+    """Saldo de pontos entre dois times nos jogos entre eles: (0, 0) é empate ou nunca se enfrentaram."""
+    jogos = [p for p in partidas if p["disputada"] and {p["mandante_idx"], p["visitante_idx"]} == {a["idx"], b["idx"]}]
+    pa = sum(3 * r["vitorias"] + r["empates"] for r in (_campanha([p], a["idx"]) for p in jogos))
+    pb = sum(3 * r["vitorias"] + r["empates"] for r in (_campanha([p], b["idx"]) for p in jogos))
+    return (0, 0) if pa == pb else (pa, pb)
+
+
+def _confronto(pernas: list[dict]) -> dict:
+    """Ida e volta do mesmo par de times: agregado e pênaltis do último jogo."""
+    primeiro, ultimo = pernas[0], pernas[-1]
+    jogados = [p for p in pernas if p["disputada"]]
+    times = []
+    for lado in ("mandante", "visitante"):
+        idx = primeiro[f"{lado}_idx"]
+        pen = None
+        if ultimo["disputada"] and ultimo["penaltis_mandante"] + ultimo["penaltis_visitante"]:
+            pen = ultimo["penaltis_mandante"] if ultimo["mandante_idx"] == idx else ultimo["penaltis_visitante"]
+        times.append({"idx": idx, "nome": primeiro[lado], "escudo": primeiro[f"{lado}_escudo"],
+                      "gols": sum(_placar(p, idx)[0] for p in jogados) if jogados else None,
+                      "penaltis": pen, "vencedor": False})
+    return {"times": times, "encerrado": len(jogados) == len(pernas),
+            "jogos": [{"id": p["id"], "data": p["data"], "disputada": p["disputada"],
+                       "placar": f"{p['gols_mandante']}-{p['gols_visitante']}"} for p in pernas]}
+
+
+MESMA_FASE = 3  # dias: jogos de ida a até 3 dias um do outro são da mesma fase
+
+
+def _chaveamento(fases: list[dict]) -> list[dict]:
+    """Colunas do mata-mata em ordem de chave. O PES às vezes grava um jogo com a rodada da fase seguinte (a volta,
+    ou o jogo único de uma fase), então a rodada gravada não basta: o confronto é montado pelo par de times, a fase
+    sai da data do jogo de ida (os jogos de uma fase acontecem juntos) e o nome vem do confronto com a menor rodada
+    da fase (o deslocamento é sempre para cima). Quem passou é quem aparece na fase seguinte (na última, quem fez
+    mais gols no agregado e depois nos pênaltis). A ordem vem de trás para frente, a partir da última fase."""
+    pares, titulo_do_jogo = {}, {}
+    for f in fases:
+        for p in f["partidas"]:
+            pares.setdefault(frozenset((p["mandante_idx"], p["visitante_idx"])), []).append(p)
+            titulo_do_jogo[p["id"]] = f["titulo"]
+    confrontos = []
+    for pernas in pares.values():
+        pernas.sort(key=lambda p: p["data"])
+        primeiro = min(pernas, key=lambda p: (p.get("rodada") or 0, p["data"]))
+        confrontos.append((pernas[0]["data"], (primeiro.get("rodada") or 0, titulo_do_jogo[primeiro["id"]]),
+                           _confronto(pernas)))
+    confrontos.sort(key=lambda c: c[0])
+    grupos = []
+    for inicio, rodada, c in confrontos:
+        if grupos and (date.fromisoformat(inicio) - date.fromisoformat(grupos[-1][-1][0])).days <= MESMA_FASE:
+            grupos[-1].append((inicio, rodada, c))
+        else:
+            grupos.append([(inicio, rodada, c)])
+    # o save às vezes grava um jogo de outra competição com o id da copa (Monterrey x PSG, do Mundial, no mata-mata
+    # da Champions 2025/26; América de Cali x Millonarios na Copa do Brasil 2026): numa copa de ida e volta, um jogo
+    # único sozinho na sua data sai, a não ser que seja a final (rodada 53; o deslocamento do PES nunca puxa para baixo)
+    if any(len(c["jogos"]) > 1 for _, _, c in confrontos):
+        grupos = [g for g in grupos if not (len(g) == 1 and len(g[0][2]["jogos"]) == 1 and g[0][1][0] < 53)]
+    colunas = [{"titulo": min(r for _, r, _ in g)[1], "confrontos": [c for _, _, c in g]} for g in grupos]
+    for i in range(len(colunas) - 2, -1, -1):
+        ordem = [t["idx"] for c in colunas[i + 1]["confrontos"] for t in c["times"]]
+        posicao = lambda c: min((ordem.index(t["idx"]) for t in c["times"] if t["idx"] in ordem), default=len(ordem))
+        colunas[i]["confrontos"].sort(key=posicao)
+
+    times = lambda c: {t["idx"] for t in c["times"]}
+    for i, col in enumerate(colunas):
+        seguinte = colunas[i + 1]["confrontos"] if i + 1 < len(colunas) else []
+        seguintes = set().union(*map(times, seguinte)) if seguinte else None
+        for c in col["confrontos"]:
+            a, b = c["times"]
+            if seguintes is not None and (a["idx"] in seguintes) != (b["idx"] in seguintes):
+                (a if a["idx"] in seguintes else b)["vencedor"] = True
+            elif seguintes is None and c["encerrado"] and (a["gols"], a["penaltis"] or 0) != (b["gols"], b["penaltis"] or 0):
+                (a if (a["gols"], a["penaltis"] or 0) > (b["gols"], b["penaltis"] or 0) else b)["vencedor"] = True
+        # as linhas ligam o par (2k, 2k+1) ao confronto k da fase seguinte só quando os times batem de verdade
+        col["encaixa"] = bool(seguinte) and len(col["confrontos"]) == 2 * len(seguinte) and all(
+            times(prox) <= times(col["confrontos"][2 * k]) | times(col["confrontos"][2 * k + 1])
+            for k, prox in enumerate(seguinte))
+    return colunas
+
+
+def edicoes(con: sqlite3.Connection, cid: int) -> list[dict]:
+    """Edições de todas as competições guardadas: as do clube primeiro, a temporada mais recente antes, ligas de
+    pontos corridos antes das copas."""
+    clube = _ultima(con, cid)["clube_idx"]
+    lista = []
+    for chave, e in _edicoes(con, cid).items():
+        todas = [p for t in e["partes"] for p in t]
+        lista.append({"chave": chave, "nome": e["nome"], "temporada": e["temporada"],
+                      "do_clube": any(clube in (p["mandante_idx"], p["visitante_idx"]) for p in todas),
+                      "liga": all(p["rodada"] < MATA_MATA and not p["grupo"] for p in todas)})
+    return sorted(lista, key=lambda e: (not e["do_clube"], -int(e["temporada"][:4]), not e["liga"],
+                                        e["nome"].casefold()))
+
+
+def edicao(con: sqlite3.Connection, cid: int, chave: str) -> dict | None:
+    e = _edicoes(con, cid).get(chave)
+    if e is None:
+        return None
+    clube = _ultima(con, cid)["clube_idx"]
+    todas = sorted((p for t in e["partes"] for p in t), key=lambda p: p["data"])
+    fases = _fases(e["partes"])
+    # a fase preliminar vem em chaves paralelas e não entra na chave do mata-mata
+    mata_mata = [f for f in fases if f["tipo"] == "jogos" and f["titulo"] != "Fase preliminar"]
+    return {"nome": e["nome"], "temporada": e["temporada"], "fases": fases, "chaveamento": _chaveamento(mata_mata),
+            "partidas_clube": [p for p in todas if clube in (p["mandante_idx"], p["visitante_idx"])]}

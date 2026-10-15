@@ -285,3 +285,179 @@ def test_banco_sem_orcamento_ganha_as_colunas_e_rele_os_saves(tmp_path):
     assert contar(con, "SELECT count(*) FROM arquivo") == 0
     assert "posicao" in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}
     con.close()
+
+
+def test_idade_no_elenco(con):
+    banco.gravar_nomes(con, {10: "Veterano", 11: "Sem idade"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10, 11), idades={10: 35, 99: 20}), AGORA)
+    assert {l["nome"]: l["idade"] for l in banco.elenco(con, 1, 2026)} == {"Veterano": 35, "Sem idade": None}
+
+
+def test_banco_sem_idade_ganha_a_coluna_e_rele_os_saves(tmp_path):
+    caminho = tmp_path / "v.db"
+    banco.conectar(caminho).close()
+    antigo = sqlite3.connect(caminho)
+    antigo.executescript("ALTER TABLE elenco DROP COLUMN idade; INSERT INTO arquivo VALUES('x/ML00000000', 1, 1.0);")
+    antigo.close()
+    con = banco.conectar(caminho)
+    assert contar(con, "SELECT count(*) FROM arquivo") == 0
+    con.close()
+
+
+COMPETICOES = {29: "Brasileirão Série A", 31: "Copa do Brasil", 9: "Copa Libertadores", 10: "Copa Libertadores"}
+
+
+def test_campeonatos(con):
+    liga = lambda dia, m, v, gols, r: partida(dia, m, v, gols, [atuacao(10, 0)] if gols != (0, 0) or m == 0 else [],
+                                             comp=29, rodada=r)
+    banco.gravar(con, "ML00000000", fazer_save("2026-06-01", [
+        # liga de 2025: B campeão
+        liga("2025-04-01", 1, 0, (2, 0), 0), liga("2025-04-08", 2, 1, (0, 1), 1), liga("2025-04-15", 0, 2, (1, 1), 2),
+        # liga de 2026 (a rodada volta a 0 depois de uma pausa longa); a rodada 2 ainda não foi jogada
+        liga("2026-04-05", 0, 1, (3, 1), 0), liga("2026-04-12", 1, 2, (2, 2), 1), liga("2026-04-19", 2, 0, (0, 0), 2),
+        # copa: semifinal (2 confrontos) e final
+        partida("2026-05-01", 0, 1, (1, 0), [atuacao(10, 0)], comp=31, rodada=52),
+        partida("2026-05-02", 2, 1, (0, 2), [], comp=31, rodada=52),
+        partida("2026-05-20", 0, 1, (0, 0), [atuacao(10, 0)], (4, 3), comp=31, rodada=53),
+        # libertadores: fase de grupos (id 9) e mata-mata (id 10) juntam numa edição só
+        partida("2026-03-01", 0, 1, (2, 0), [atuacao(10, 0)], comp=9, grupo=1, rodada=0),
+        partida("2026-03-01", 2, 1, (1, 0), [], comp=9, grupo=2, rodada=0),
+        partida("2026-07-01", 0, 2, (1, 0), [atuacao(10, 0)], comp=10, rodada=53),
+    ], competicoes=COMPETICOES), AGORA)
+
+    eds = banco.edicoes(con, 1)
+    assert [(e["nome"], e["temporada"]) for e in eds] == [
+        ("Brasileirão Série A", "2026"), ("Copa do Brasil", "2026"), ("Copa Libertadores", "2026"),
+        ("Brasileirão Série A", "2025")]
+
+    liga26 = banco.edicao(con, 1, eds[0]["chave"])
+    (fase,) = liga26["fases"]
+    assert (fase["tipo"], fase["rodadas_jogadas"], fase["rodadas_total"]) == ("tabela", 2, 3)
+    linhas = [(l["nome"], l["jogos"], l["pontos"], l["gols_pro"] - l["gols_contra"]) for l in fase["grupos"][0]["linhas"]]
+    assert linhas == [("Clube A", 1, 3, 2), ("Clube C", 1, 1, 0), ("Clube B", 2, 1, -2)]
+
+    liga25 = banco.edicao(con, 1, eds[3]["chave"])
+    assert liga25["fases"][0]["grupos"][0]["linhas"][0]["nome"] == "Clube B"
+
+    copa = banco.edicao(con, 1, eds[1]["chave"])
+    assert [(f["titulo"], f["tipo"], len(f["partidas"])) for f in copa["fases"]] == [("Semifinal", "jogos", 2),
+                                                                                     ("Final", "jogos", 1)]
+    assert len(copa["partidas_clube"]) == 2
+
+    lib = banco.edicao(con, 1, eds[2]["chave"])
+    assert [(f["titulo"], f["tipo"]) for f in lib["fases"]] == [("Fase de grupos", "tabela"), ("Final", "jogos")]
+    assert [g["titulo"] for g in lib["fases"][0]["grupos"]] == ["Grupo A", "Grupo B"]
+    assert banco.partidas(con, 1, 2026)[0]["competicao"] == "Copa Libertadores"
+
+
+def test_supercopa_de_cada_ano_e_uma_edicao(con):
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2025-01-20", 1, 2, (1, 0), [atuacao(50, 0, 1)], comp=7, rodada=53),
+        partida("2026-01-20", 2, 1, (2, 0), [atuacao(60, 0, 2)], comp=7, rodada=53),
+    ], competicoes={7: "Supercopa"}), AGORA)
+    assert [(e["nome"], e["temporada"]) for e in banco.edicoes(con, 1)] == [("Supercopa", "2026"), ("Supercopa", "2025")]
+
+
+def test_partida_que_ja_estava_no_banco_ganha_a_competicao(con):
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [partida("2026-02-01", 0, 1, (1, 0), [atuacao(10, 0)])]), AGORA)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2026-02-01", 0, 1, (1, 0), [atuacao(10, 0)], comp=29, rodada=0)], competicoes=COMPETICOES), AGORA)
+    assert banco.partidas(con, 1, 2026)[0]["competicao"] == "Brasileirão Série A"
+
+
+def test_jogo_avulso_sai_da_fase_de_grupos():
+    jogo = lambda m, v: {"mandante_idx": m, "visitante_idx": v}
+    grupo = [jogo(1, 2), jogo(3, 4), jogo(1, 3), jogo(2, 4), jogo(8, 9)]  # 8 x 9: marcado no grupo, mas só joga ali
+    assert banco._sem_avulsos(grupo) == grupo[:4]
+
+
+def jogo_de_copa(pid, data, m, v, gm, gv, pm=0, pv=0, disputada=1):
+    nomes = "ABCDEFGH"
+    return {"id": pid, "data": data, "mandante_idx": m, "visitante_idx": v, "mandante": f"Time {nomes[m]}",
+            "visitante": f"Time {nomes[v]}", "mandante_escudo": None, "visitante_escudo": None, "gols_mandante": gm,
+            "gols_visitante": gv, "penaltis_mandante": pm, "penaltis_visitante": pv, "disputada": disputada}
+
+
+def test_chaveamento():
+    fases = [
+        {"titulo": "Semifinal", "tipo": "jogos", "partidas": [
+            jogo_de_copa(1, "2026-05-01", 0, 1, 1, 0), jogo_de_copa(2, "2026-05-08", 1, 0, 2, 1),  # 2 x 2 no agregado
+            jogo_de_copa(3, "2026-05-01", 2, 3, 0, 3), jogo_de_copa(4, "2026-05-08", 3, 2, 1, 1),
+        ]},
+        {"titulo": "Final", "tipo": "jogos", "partidas": [{**jogo_de_copa(5, "2026-05-20", 3, 0, 0, 0, 3, 4), "rodada": 53}]},
+    ]
+    semis, final = banco._chaveamento(fases)
+    # a ordem da chave segue a final: o semifinalista que é mandante na final (D) vem primeiro
+    assert [[t["nome"] for t in c["times"]] for c in semis["confrontos"]] == [["Time C", "Time D"], ["Time A", "Time B"]]
+    assert [(t["gols"], t["vencedor"]) for t in semis["confrontos"][1]["times"]] == [(2, True), (2, False)]  # passou A
+    assert [j["id"] for j in semis["confrontos"][1]["jogos"]] == [1, 2]
+    assert (semis["encaixa"], final["encaixa"]) == (True, False)
+    assert [(t["nome"], t["penaltis"], t["vencedor"]) for t in final["confrontos"][0]["times"]] == [
+        ("Time D", 3, False), ("Time A", 4, True)]
+
+
+def test_chaveamento_sem_jogos_disputados():
+    (fase,) = banco._chaveamento([{"titulo": "Final", "tipo": "jogos",
+                                   "partidas": [jogo_de_copa(1, "2026-12-01", 0, 1, 0, 0, disputada=0)]}])
+    assert [(t["gols"], t["vencedor"]) for t in fase["confrontos"][0]["times"]] == [(None, False), (None, False)]
+
+
+def test_chave_reconstruida_pelos_times_quando_a_rodada_do_save_vem_trocada():
+    # 4 quartas, 2 semis, final; o save gravou a quarta C x D com a rodada da semifinal (52)
+    j = lambda pid, data, m, v, gm, gv, r: {**jogo_de_copa(pid, data, m, v, gm, gv), "rodada": r}
+    fases = [
+        {"titulo": "Quartas de final", "tipo": "jogos", "partidas": [
+            j(1, "2026-03-01", 0, 1, 1, 0, 51), j(3, "2026-03-01", 4, 5, 2, 0, 51), j(4, "2026-03-01", 6, 7, 0, 1, 51)]},
+        {"titulo": "Semifinal", "tipo": "jogos", "partidas": [
+            j(2, "2026-03-01", 2, 3, 0, 3, 52), j(5, "2026-04-01", 0, 3, 1, 1, 52), j(6, "2026-04-01", 4, 7, 2, 1, 52)]},
+        {"titulo": "Final", "tipo": "jogos", "partidas": [j(7, "2026-05-01", 4, 0, 1, 0, 53)]},
+    ]
+    q, s, f = banco._chaveamento(fases)
+    assert [c["titulo"] for c in (q, s, f)] == ["Quartas de final", "Semifinal", "Final"]
+    assert all(c["encaixa"] for c in (q, s))
+    nomes = lambda col: [[t["nome"] for t in c["times"]] if c else None for c in col["confrontos"]]
+    assert nomes(f) == [["Time E", "Time A"]]
+    assert nomes(s) == [["Time E", "Time H"], ["Time A", "Time D"]]
+    assert nomes(q) == [["Time E", "Time F"], ["Time G", "Time H"], ["Time A", "Time B"], ["Time C", "Time D"]]
+
+
+def test_jogo_unico_sozinho_numa_copa_de_ida_e_volta_sai_da_chave():
+    # Monterrey x PSG gravado com o id do mata-mata da Champions, dois meses antes das oitavas
+    fases = [{"titulo": "Oitavas de final", "tipo": "jogos", "partidas": [
+        jogo_de_copa(1, "2025-12-19", 6, 0, 0, 2),
+        jogo_de_copa(2, "2026-02-24", 0, 1, 1, 0), jogo_de_copa(3, "2026-03-17", 1, 0, 0, 0),
+        jogo_de_copa(4, "2026-02-24", 2, 3, 2, 2), jogo_de_copa(5, "2026-03-17", 3, 2, 1, 0)]}]
+    (oitavas,) = banco._chaveamento(fases)
+    assert [[t["nome"] for t in c["times"]] for c in oitavas["confrontos"]] == [["Time A", "Time B"], ["Time C", "Time D"]]
+
+
+def test_copa_de_jogo_unico_mantem_a_primeira_fase_com_um_confronto():
+    fases = [{"titulo": "1ª fase", "tipo": "jogos", "partidas": [jogo_de_copa(1, "2025-03-14", 0, 1, 4, 0)]},
+             {"titulo": "Oitavas de final", "tipo": "jogos", "partidas": [
+                 jogo_de_copa(2, "2025-05-16", 0, 2, 0, 1), jogo_de_copa(3, "2025-05-16", 3, 4, 1, 0)]}]
+    assert [len(c["confrontos"]) for c in banco._chaveamento(fases)] == [1, 2]
+
+
+def test_classificacao_usa_confronto_direto_e_divide_a_posicao():
+    # como no Brasileirão 2026 do save: Mirassol, São Paulo e Cuiabá com 3 pontos e 2-3; o Mirassol venceu o
+    # São Paulo; São Paulo e Cuiabá não se enfrentaram e dividem a posição (a tela do PES mostra 11, 12, 12)
+    jogos = [jogo_de_copa(1, "2026-01-20", 0, 1, 2, 0),   # M 2 x 0 S
+             jogo_de_copa(2, "2026-01-27", 3, 0, 3, 0),   # X 3 x 0 M
+             jogo_de_copa(3, "2026-01-20", 1, 4, 2, 1),   # S 2 x 1 I
+             jogo_de_copa(4, "2026-01-20", 2, 5, 2, 0),   # C 2 x 0 Y
+             jogo_de_copa(5, "2026-01-27", 6, 2, 3, 0)]   # Z 3 x 0 C
+    linhas = banco._classificacao(jogos)
+    assert [(l["nome"], l["posicao"]) for l in linhas] == [
+        ("Time D", 1), ("Time G", 1), ("Time A", 3), ("Time B", 4), ("Time C", 4), ("Time E", 6), ("Time F", 7)]
+
+
+
+def test_empate_triplo_sem_confronto_entre_dois_deles_nao_divide_com_quem_tem_mais_pontos_diretos():
+    # A, B e C terminam iguais (3 pontos, 1-1); A venceu C; B não jogou contra nenhum dos dois
+    jogos = [jogo_de_copa(1, "2026-01-20", 0, 2, 1, 0),   # A 1 x 0 C
+             jogo_de_copa(2, "2026-01-27", 3, 0, 1, 0),   # D 1 x 0 A
+             jogo_de_copa(3, "2026-01-20", 1, 4, 1, 0),   # B 1 x 0 E
+             jogo_de_copa(4, "2026-01-27", 5, 1, 1, 0),   # F 1 x 0 B
+             jogo_de_copa(5, "2026-01-27", 2, 6, 1, 0)]   # C 1 x 0 G
+    pos = {l["nome"]: l["posicao"] for l in banco._classificacao(jogos)}
+    assert (pos["Time A"], pos["Time B"], pos["Time C"]) == (3, 4, 4)  # D e F dividem o 1º; A à frente; B e C dividem

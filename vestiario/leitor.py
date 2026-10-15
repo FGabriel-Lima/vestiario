@@ -1,5 +1,6 @@
 """Lê um save da Master League do PES 2021 (Football Life 2026 / Transfer Patch). Tudo na memória."""
 import struct
+import zlib
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
@@ -12,6 +13,9 @@ ELENCO = 412                         # (u32 vaga, u32 player_id) a partir de i*T
 ELENCO_MAX = 40                      # elenco cheio não tem a vaga 0xFFFF que marca o fim
 PARTIDA0, PARTIDA_TAM, PARTIDAS = 3_316_488, 596, 13_000
 VAGAS, VAGA_TAM = 34, 16             # 17 por lado, mandante primeiro
+COMPETICAO, RODADA = 592, 594        # u16 (grupo << 8 | competição) e u16 (flags << 8 | rodada) no registro da partida
+# Tabela de competições (fixa nos 4 saves conferidos): registros de 788 bytes (u16 id, nome UTF-8)
+COMPETICOES0, COMPETICAO_TAM = 2_040_080, 788
 VAZIO = bytes.fromhex("ffff000003000000")
 INDEFINIDO = 0x3FFF                  # time ainda não definido (mata-mata)
 PID = 0x3FFFFFFF                     # bits altos do player_id são flags
@@ -20,6 +24,9 @@ PID = 0x3FFFFFFF                     # bits altos do player_id são flags
 LIVRO0, LIVRO_TAM, LIVRO_N = 13_108_192, 52, 100
 MOEDA = 430                          # R$ por unidade de dinheiro do save (conferido nas telas do PES em 31/01/2026)
 ORCAMENTO = 13_098_240               # u32 orçamento de transferências (× MOEDA), fixo nos 3 saves conferidos
+# Bloco compactado (assinatura 20 11 09 12, fixo nos 4 saves conferidos): pedaços zlib com cabeçalho BE.
+# Descompactado, 30.001 registros de 156 bytes, um por jogador da ML (inclusive os gerados por ela).
+BLOCO0, BLOCO_REG, BLOCO_ID, BLOCO_IDADE = 18_088_888, 156, 36, 18  # idade em +18, bits 2..7
 CONTRATO_TAM = 48                    # contratos do clube do usuário; a tabela muda de lugar (veja ler_contratos)
 
 
@@ -57,6 +64,9 @@ class Partida:
     gols: tuple[int, int]
     penaltis: tuple[int, int]
     escalacao: list[Atuacao]
+    competicao: int | None = None    # id na tabela de competições
+    grupo: int = 0                   # 0 = sem grupo; 1 = A, 2 = B… (fase de grupos)
+    rodada: int = 0                  # 0.. em pontos corridos e grupos; 46..53 no mata-mata (53 = final)
 
     @property
     def disputada(self) -> bool:
@@ -77,6 +87,8 @@ class Save:
     negocios: list[Negocio] = field(default_factory=list)   # livro de transferências do clube do usuário
     contratos: dict[int, Contrato] = field(default_factory=dict)  # player_id → contrato, só do clube do usuário
     orcamento: int | None = None     # orçamento de transferências (× MOEDA = R$)
+    idades: dict[int, int] = field(default_factory=dict)  # player_id → idade atual na ML
+    competicoes: dict[int, str] = field(default_factory=dict)  # id → nome
 
 
 def _cstr(b: bytes, o: int = 0) -> str:
@@ -162,6 +174,35 @@ def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
             if chave == carreira or ((o - base) % CONTRATO_TAM == 0 and abs(o - base) <= CONTRATO_TAM * 64)}
 
 
+def ler_idades(data: bytes) -> dict[int, int]:
+    """Idade atual de cada jogador na ML (a do Player.bin é a do patch e não avança com as temporadas)."""
+    if data[BLOCO0:BLOCO0 + 4] != bytes.fromhex("20110912"):
+        return {}  # ponytail: posição fixa nos saves conferidos; noutro layout o elenco fica sem idade
+    total = struct.unpack_from(">I", data, BLOCO0 + 8)[0]
+    p, raw = BLOCO0 + 16, bytearray()
+    try:
+        while len(raw) < total:
+            tam = struct.unpack_from(">I", data, p + 4)[0]
+            raw += zlib.decompress(data[p + 12:p + 12 + tam])
+            p += 12 + tam
+    except (struct.error, zlib.error):
+        return {}
+    idades = {}
+    for o in range(0, len(raw) - BLOCO_REG + 1, BLOCO_REG):
+        if pid := struct.unpack_from("<I", raw, o + BLOCO_ID)[0] & PID:
+            idades[pid] = raw[o + BLOCO_IDADE] >> 2
+    return idades
+
+
+def ler_competicoes(data: bytes) -> dict[int, str]:
+    nomes = {}
+    for o in range(COMPETICOES0, len(data) - COMPETICAO_TAM + 1, COMPETICAO_TAM):
+        if not (nome := data[o + 2:o + 80].split(b"\0")[0]):
+            break
+        nomes[struct.unpack_from("<H", data, o)[0]] = nome.decode("utf8", "replace")
+    return nomes
+
+
 def ler_partidas(data: bytes, n_times: int) -> list[Partida]:
     partidas = []
     for i in range(PARTIDAS):
@@ -184,7 +225,10 @@ def ler_partidas(data: bytes, n_times: int) -> list[Partida]:
             if vaga != 0xFFFF:
                 escalacao.append(Atuacao(pid & PID, s // 17, x & 0xFF, (x >> 8) & 0xFF))
         p = data[h + 20:h + 26]
-        partidas.append(Partida(dia, mand, vis, (p[0] + p[1], p[3] + p[4]), (p[2], p[5]), escalacao))
+        comp, rodada = struct.unpack_from("<HH", data, h + COMPETICAO)
+        # o byte alto da competição vem em passos de 4 (4 = grupo A, 8 = B…)
+        partidas.append(Partida(dia, mand, vis, (p[0] + p[1], p[3] + p[4]), (p[2], p[5]), escalacao,
+                                comp & 0xFF, comp >> 10, rodada & 0xFF))
     return partidas
 
 
@@ -201,4 +245,4 @@ def ler_save(raw: bytes) -> Save:
     elencos = [ler_elenco(data, i) for i in range(len(times))]
     return Save(nome, clube, data_jogo, times, idx, elencos[idx], ler_partidas(data, len(times)),
                 ler_ids(data, len(times)), elencos, ler_negocios(data), ler_contratos(data, elencos[idx]),
-                struct.unpack_from("<I", data, ORCAMENTO)[0])
+                struct.unpack_from("<I", data, ORCAMENTO)[0], ler_idades(data), ler_competicoes(data))
