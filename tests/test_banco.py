@@ -260,7 +260,8 @@ def test_contratos_no_elenco_e_fim_de_contrato_nas_transferencias(con):
     banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [partida("2026-02-01", 0, 1, (1, 0), [atuacao(10, 0, 1)])],
                                                elenco=(10,), contratos={10: (17967, 60458, "2027-01-31")}), AGORA)
     titular = banco.elenco(con, 1, 2026)[0]
-    assert titular["contrato"] == {"salario_semanal": 345 * MOEDA, "multa": 60458 * MOEDA, "fim": "2027-01-31"}
+    assert titular["contrato"] == {"salario_semanal": 345 * MOEDA, "multa": 60458 * MOEDA, "fim": "2027-01-31",
+                                   "emprestimo": False}
     sairam = {p["nome"]: p["fim_de_contrato"] for p in banco.transferencias(con, 1)["janelas"][0]["sairam"]}
     assert sairam == {"Vencido": True, "Vendido": False}
 

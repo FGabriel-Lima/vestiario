@@ -179,7 +179,8 @@ function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
   const { dados: r, erro } = useDados(() => api.resumo(id, ano), [id, ano]);
   if (erro) return <Erro mensagem={erro} />;
   if (!r) return null;
-  const aproveitamento = r.jogos ? Math.round(((3 * r.vitorias + r.empates) / (3 * r.jogos)) * 100) : 0;
+  if (r.jogos === 0) return <TemporadaPorComecar id={id} ano={ano} clube={clube} orcamento={orcamento} dataJogo={dataJogo} />;
+  const aproveitamento = Math.round(((3 * r.vitorias + r.empates) / (3 * r.jogos)) * 100);
   const campanha = [
     ["vitorias", "Vitórias", r.vitorias],
     ["empates", "Empates", r.empates],
@@ -251,6 +252,31 @@ function Posicao({ codigo, className = "" }) {
     <span className={`inline-block w-10 rounded-sm bg-pitch-800 py-0.5 text-center font-kit text-sm font-bold ${setor(codigo)} ${className}`}>
       {POSICOES[codigo]}
     </span>
+  );
+}
+
+// Antes do primeiro jogo, aproveitamento de 0% pareceria campanha ruim: mostra o que vem pela frente
+function TemporadaPorComecar({ id, ano, clube, orcamento, dataJogo }) {
+  const { dados: ps } = useDados(() => api.partidas(id, ano), [id, ano]);
+  const proximas = (ps ?? []).filter((p) => !p.disputada).slice(0, 5);
+  return (
+    <>
+      <p className="mb-2 font-kit text-sm uppercase tracking-[0.2em] text-muted">Temporada {ano}</p>
+      <p className="mb-8 font-kit text-5xl font-extrabold uppercase leading-none">Ainda não começou</p>
+      {orcamento != null && (
+        <p className="mb-10 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Orçamento de transferências</span>
+          <Dinheiro valor={orcamento} className="font-kit text-3xl font-bold text-gold" />
+          <span className="text-sm text-muted">em {dataBR(dataJogo)}</span>
+        </p>
+      )}
+      {proximas.length > 0 && (
+        <>
+          <h2 className="mb-3 font-kit text-2xl font-semibold uppercase">Próximos jogos</h2>
+          <ListaPartidas id={id} partidas={proximas} clube={clube} />
+        </>
+      )}
+    </>
   );
 }
 
@@ -330,7 +356,9 @@ function Elenco({ id, ano, dataJogo }) {
                     <span className={`flex items-center gap-2 text-sm sm:hidden ${vencendo(c) ? "text-gold" : "text-muted"}`}>
                       <Posicao codigo={l.posicao} className="w-9 py-0 text-xs" />
                       {/* no celular só idade e mês/ano do fim do contrato; salário e multa ficam nas colunas do desktop */}
-                      {[l.idade && `${l.idade} anos`, c && `até ${dataBR(c.fim).slice(3)}`].filter(Boolean).join(" · ")}
+                      {[l.idade && `${l.idade} anos`, c && `${c.emprestimo ? "emprestado " : ""}até ${dataBR(c.fim).slice(3)}`]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                   </span>
                 </div>
@@ -339,9 +367,12 @@ function Elenco({ id, ano, dataJogo }) {
               <td className="text-right font-kit text-xl">{l.jogos}</td>
               <td className="text-right font-kit text-xl">{l.gols}</td>
               <td className="text-right font-kit text-xl">{l.assistencias}</td>
-              <td className="hidden text-right font-kit text-xl sm:table-cell">{c && <Dinheiro valor={c.salario_semanal} />}</td>
               <td className="hidden text-right font-kit text-xl sm:table-cell">
-                {c && (c.multa ? <Dinheiro valor={c.multa} /> : <span className="text-base text-muted">sem multa</span>)}
+                {/* o save não guarda salário de quem veio emprestado, só o fim do empréstimo */}
+                {c && (c.emprestimo ? <span className="rounded-sm bg-pitch-700 px-1.5 text-xs uppercase text-muted">emprestado</span> : <Dinheiro valor={c.salario_semanal} />)}
+              </td>
+              <td className="hidden text-right font-kit text-xl sm:table-cell">
+                {c && (c.emprestimo ? <span className="text-muted">–</span> : c.multa ? <Dinheiro valor={c.multa} /> : <span className="text-base text-muted">sem multa</span>)}
               </td>
               <td className={`hidden text-right font-kit text-xl sm:table-cell ${vencendo(c) ? "text-gold" : ""}`}>
                 {c && (

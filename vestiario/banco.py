@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS negocio(
 -- contratos do elenco do clube em cada sincronização (dinheiro em unidades do save, × MOEDA = R$)
 CREATE TABLE IF NOT EXISTS contrato(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL,
-  salario_anual INTEGER NOT NULL, multa INTEGER NOT NULL, fim TEXT NOT NULL, PRIMARY KEY(sincronizacao_id, player_id));
+  salario_anual INTEGER NOT NULL, multa INTEGER NOT NULL, fim TEXT NOT NULL, emprestimo INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(sincronizacao_id, player_id));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
@@ -64,6 +65,10 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
             con.execute("DELETE FROM arquivo")
     if "posicao" not in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}:
         con.execute("ALTER TABLE jogador ADD COLUMN posicao INTEGER")  # preenchida na próxima sincronização
+    if "emprestimo" not in {r[1] for r in con.execute("PRAGMA table_info(contrato)")}:
+        with con:  # banco anterior aos empréstimos: relê os saves para marcar quem veio emprestado
+            con.execute("ALTER TABLE contrato ADD COLUMN emprestimo INTEGER NOT NULL DEFAULT 0")
+            con.execute("DELETE FROM arquivo")
     if "competicao" not in {r[1] for r in con.execute("PRAGMA table_info(partida)")}:
         with con:  # banco anterior às competições: relê os saves para preencher as partidas que ainda estão neles
             con.execute("ALTER TABLE partida ADD COLUMN competicao INTEGER")
@@ -135,8 +140,9 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
              save.orcamento),
         ).fetchone()[0]
         con.executemany("INSERT INTO elenco VALUES(?, ?, ?)", [(sid, p, save.idades.get(p)) for p in save.elenco])
-        con.executemany("INSERT INTO contrato VALUES(?, ?, ?, ?, ?)",
-                        [(sid, p, c.salario_anual, c.multa, c.fim.isoformat()) for p, c in save.contratos.items()])
+        con.executemany("INSERT INTO contrato VALUES(?, ?, ?, ?, ?, ?)",
+                        [(sid, p, c.salario_anual, c.multa, c.fim.isoformat(), int(c.emprestimo))
+                         for p, c in save.contratos.items()])
         # só a sincronização mais recente de cada data do jogo guarda os vínculos (são ~18 mil por save)
         con.execute("DELETE FROM vinculo WHERE sincronizacao_id IN (SELECT id FROM sincronizacao "
                     "WHERE carreira_id = ? AND data_jogo = ? AND id <> ?)", (cid, save.data_jogo.isoformat(), sid))
@@ -332,8 +338,9 @@ def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
 
 def _contratos(con: sqlite3.Connection, sid: int) -> dict[int, dict]:
     """Contratos daquela sincronização em R$; o salário semanal é o da tela do PES (anual // 52)."""
-    return {r[0]: {"salario_semanal": r[1] // 52 * MOEDA, "multa": r[2] * MOEDA, "fim": r[3]} for r in con.execute(
-        "SELECT player_id, salario_anual, multa, fim FROM contrato WHERE sincronizacao_id = ?", (sid,))}
+    return {r[0]: {"salario_semanal": r[1] // 52 * MOEDA, "multa": r[2] * MOEDA, "fim": r[3], "emprestimo": bool(r[4])}
+            for r in con.execute("SELECT player_id, salario_anual, multa, fim, emprestimo FROM contrato "
+                                 "WHERE sincronizacao_id = ?", (sid,))}
 
 
 def lendas(con: sqlite3.Connection, cid: int, limite: int = 10) -> dict:

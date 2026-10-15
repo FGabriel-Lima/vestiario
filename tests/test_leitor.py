@@ -215,3 +215,12 @@ def test_idades_do_bloco_compactado():
 def test_save_real_idades(save_atual):
     # telas do PES em 31/01/2026: Calleri 33, Artur 28, Arboleda 35
     assert {p: save_atual.idades[p] for p in (60657, 113479, 65134)} == {60657: 33, 113479: 28, 65134: 35}
+
+
+def test_jogador_emprestado_ao_clube():
+    # tabela de empréstimos (registros de 60 bytes): vaga, player_id, 8 bytes zerados, fim do empréstimo, 0xFFFF
+    emprestimo = struct.pack("<II8x", 0x0E77, 160150) + struct.pack("<HBB", 2026, 12, 31) + b"\xff\xff" + bytes(38)
+    contratado = registro_de_contrato(0x0F9B, 41204, 17967, 60458, (2027, 1, 31), (2026, 1, 9))
+    c = ler_contratos(b"\x1b" * 7 + contratado + emprestimo, [41204, 160150])
+    assert (c[160150].emprestimo, c[160150].fim, c[160150].salario_anual) == (True, date(2026, 12, 31), 0)
+    assert c[41204].emprestimo is False

@@ -54,6 +54,7 @@ class Contrato:
     salario_anual: int               # unidades do save; o semanal da tela é salario_anual // 52 * MOEDA
     multa: int                       # × MOEDA = R$; 0 = sem multa rescisória
     fim: date
+    emprestimo: bool = False         # emprestado ao clube: o save só guarda o fim do empréstimo (sem salário nem dono)
 
 
 @dataclass
@@ -170,8 +171,19 @@ def ler_contratos(data: bytes, elenco: list[int]) -> dict[int, Contrato]:
         return {}
     carreira = Counter(c[1] for c in candidatos).most_common(1)[0][0]
     base = min(o for o, chave, *_ in candidatos if chave == carreira)
-    return {pid: c for o, chave, pid, c in candidatos
-            if chave == carreira or ((o - base) % CONTRATO_TAM == 0 and abs(o - base) <= CONTRATO_TAM * 64)}
+    contratos = {pid: c for o, chave, pid, c in candidatos
+                 if chave == carreira or ((o - base) % CONTRATO_TAM == 0 and abs(o - base) <= CONTRATO_TAM * 64)}
+    # quem veio emprestado fica noutra tabela, perto desta: (vaga, player_id, 8 bytes zerados, fim do empréstimo, 0xFFFF)
+    # (conferido com Cauly, Artur e Pedro Lima, emprestados ao São Paulo no começo da Liga Master 04)
+    for pid in set(elenco) - contratos.keys():
+        p = data.find(struct.pack("<I", pid), max(4, base - 1_000_000))
+        while p != -1 and p < base + 1_000_000:
+            o = p - 4
+            if data[o + 8:o + 16] == bytes(8) and data[o + 20:o + 22] == bytes.fromhex("ffff") and (fim := _data(data, o + 16)):
+                contratos[pid] = Contrato(0, 0, fim, emprestimo=True)
+                break
+            p = data.find(struct.pack("<I", pid), p + 1)
+    return contratos
 
 
 def ler_idades(data: bytes) -> dict[int, int]:
