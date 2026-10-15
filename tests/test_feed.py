@@ -66,3 +66,17 @@ def test_perfil_oficial_do_clube():
     assert feed.arroba_do_clube("São Paulo") == "saopaulofc"
     assert feed.arroba_do_clube("Ceará SC") == "cearasc"
     assert feed.arroba_do_clube("Atlético Mineiro") == "atleticomineiro"
+
+
+
+def test_jogo_no_dia_da_sincronizacao_anterior_entra_uma_vez(monkeypatch):
+    c = banco.conectar(":memory:")
+    monkeypatch.setattr(ia, "responder", lambda *a: {"posts": []})
+    jogo = lambda gols, esc: partida("2026-01-22", 0, 1, gols, esc, comp=29, rodada=0)
+    # save gravado no dia do jogo, antes da partida
+    banco.gravar(c, "ML00000000", fazer_save("2026-01-22", [jogo((0, 0), [])], competicoes=COMPETICOES), AGORA)
+    feed.atualizar(c, 1)
+    banco.gravar(c, "ML00000000", fazer_save("2026-01-27", [jogo((0, 1), [atuacao(50, 1, 1)])], competicoes=COMPETICOES), AGORA)
+    assert [p["tipo"] for p in feed.atualizar(c, 1)["posts"]].count("fim_de_jogo") == 1
+    banco.gravar(c, "ML00000000", fazer_save("2026-02-01", [jogo((0, 1), [atuacao(50, 1, 1)])], competicoes=COMPETICOES), AGORA)
+    assert [p["tipo"] for p in feed.atualizar(c, 1)["posts"]].count("fim_de_jogo") == 1  # não repete

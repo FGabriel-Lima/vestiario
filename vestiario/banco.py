@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS competicao(
   carreira_id INTEGER NOT NULL REFERENCES carreira, id INTEGER NOT NULL, nome TEXT NOT NULL, PRIMARY KEY(carreira_id, id));
 CREATE TABLE IF NOT EXISTS escalacao(
   partida_id INTEGER NOT NULL REFERENCES partida ON DELETE CASCADE, player_id INTEGER NOT NULL,
-  lado INTEGER NOT NULL, gols INTEGER NOT NULL, assistencias INTEGER NOT NULL);
+  lado INTEGER NOT NULL, gols INTEGER NOT NULL, assistencias INTEGER NOT NULL,
+  minutos INTEGER NOT NULL DEFAULT 0, nota INTEGER);
 CREATE INDEX IF NOT EXISTS escalacao_partida ON escalacao(partida_id);
 CREATE TABLE IF NOT EXISTS arquivo(caminho TEXT PRIMARY KEY, tamanho INTEGER NOT NULL, mtime REAL NOT NULL);
 """
@@ -81,6 +82,11 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
             con.execute("DELETE FROM arquivo")
     if "posicao" not in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}:
         con.execute("ALTER TABLE jogador ADD COLUMN posicao INTEGER")  # preenchida na próxima sincronização
+    if "minutos" not in {r[1] for r in con.execute("PRAGMA table_info(escalacao)")}:
+        with con:  # banco anterior aos minutos e notas: relê os saves para preenchê-los
+            con.execute("ALTER TABLE escalacao ADD COLUMN minutos INTEGER NOT NULL DEFAULT 0")
+            con.execute("ALTER TABLE escalacao ADD COLUMN nota INTEGER")
+            con.execute("DELETE FROM arquivo")
     if "valor" not in {r[1] for r in con.execute("PRAGMA table_info(elenco)")}:
         with con:  # banco anterior ao valor de mercado: relê os saves para preenchê-lo
             con.execute("ALTER TABLE elenco ADD COLUMN valor INTEGER")
@@ -218,8 +224,9 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
                 (cid, *chave, *p.gols, *p.penaltis, int(p.disputada), p.competicao, p.grupo, p.rodada),
             ).fetchone()[0]
             con.execute("DELETE FROM escalacao WHERE partida_id = ?", (pid,))
-            con.executemany("INSERT INTO escalacao VALUES(?, ?, ?, ?, ?)",
-                            [(pid, a.player_id, a.lado, a.gols, a.assistencias) for a in p.escalacao])
+            con.executemany("INSERT INTO escalacao VALUES(?, ?, ?, ?, ?, ?, ?)",
+                            [(pid, a.player_id, a.lado, a.gols, a.assistencias, a.minutos, a.nota)
+                             for a in p.escalacao])
         return {"carreira_id": cid, "novas": novas, "atualizadas": atualizadas}
 
 
@@ -290,7 +297,8 @@ def partida(con: sqlite3.Connection, cid: int, pid: int) -> dict | None:
     if p is None:
         return None
     return {**dict(p), "escalacao": [dict(r) for r in con.execute(
-        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) AS nome, e.lado, e.gols, e.assistencias "
+        "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) AS nome, e.lado, e.gols, e.assistencias,"
+        " e.minutos, round(e.nota / 10.0, 1) AS nota "
         "FROM escalacao e LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.partida_id = ? ORDER BY e.rowid",
         (pid,))]}
 
@@ -335,7 +343,8 @@ def confrontos(con: sqlite3.Connection, cid: int) -> list[dict]:
 # ponytail: o clube é o da sincronização mais recente; se o usuário trocar de clube, a história do anterior some daqui.
 _ESTATS = (
     "SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id) AS nome, j.posicao, count(*) AS jogos,"
-    " sum(e.gols) AS gols, sum(e.assistencias) AS assistencias "
+    " sum(e.gols) AS gols, sum(e.assistencias) AS assistencias, sum(e.minutos) AS minutos,"
+    " round(avg(e.nota) / 10.0, 1) AS nota "
     "FROM escalacao e JOIN partida p ON p.id = e.partida_id LEFT JOIN jogador j ON j.player_id = e.player_id "
     "WHERE p.carreira_id = :cid AND e.lado = CASE :clube WHEN p.mandante_idx THEN 0 WHEN p.visitante_idx THEN 1 END "
 )
@@ -352,7 +361,7 @@ def elenco(con: sqlite3.Connection, cid: int, ano: int) -> list[dict]:
         "LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.sincronizacao_id = ?", (s["id"],))}
     for pid, (nome, posicao, *_) in atuais.items() if ano == int(s["data_jogo"][:4]) else ():
         linhas.setdefault(pid, {"player_id": pid, "nome": nome, "posicao": posicao, "jogos": 0, "gols": 0,
-                                "assistencias": 0})
+                                "assistencias": 0, "minutos": 0, "nota": None})
     contratos = _contratos(con, s["id"])
     for pid, linha in linhas.items():
         linha["no_elenco"] = pid in atuais
@@ -534,6 +543,10 @@ def fatos_da_proposta(con: sqlite3.Connection, cid: int, pid: int, clube_idx: in
     jogador["temporada"] = {"jogos": n["jogos"] if n else 0, "gols": n["gols"] if n else 0,
                             "assistencias": n["assistencias"] if n else 0,
                             "jogos_do_clube": len([x for x in partidas(con, cid, int(ano)) if x["disputada"]])}
+    if n and n["minutos"]:
+        jogador["temporada"]["minutos_jogados"] = n["minutos"]
+    if n and n["nota"] is not None:
+        jogador["temporada"]["nota_media"] = n["nota"]
     colegas = []
     if posicao is not None:
         for r in con.execute("SELECT j.nome, e.idade FROM elenco e JOIN jogador j USING(player_id) "

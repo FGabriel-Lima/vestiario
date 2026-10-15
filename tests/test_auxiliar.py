@@ -28,7 +28,8 @@ def test_fatos_da_proposta_so_com_dados_existentes(con):
     j = f["jogador"]
     assert (j["nome"], j["idade"], j["posicao"], j["valor_de_mercado"]) == ("Zagueiro", 35, "ZC", 8000 * MOEDA)
     assert j["contrato"] == {"salario_semanal": 16182 // 52 * MOEDA, "multa_rescisoria": 10160 * MOEDA, "fim": "2027-01-31"}
-    assert j["temporada"] == {"jogos": 1, "gols": 1, "assistencias": 0, "jogos_do_clube": 2}
+    assert j["temporada"] == {"jogos": 1, "gols": 1, "assistencias": 0, "jogos_do_clube": 2, "minutos_jogados": 90,
+                              "nota_media": 6.0}
     assert f["elenco_na_mesma_posicao"] == [{"nome": "Outro Zagueiro", "idade": 24}]
     assert f["clube"] == {"nome": "Clube A", "orcamento_de_transferencias": 87333 * MOEDA, "data_no_jogo": "2026-03-01"}
     assert "dados_que_nao_temos" not in f

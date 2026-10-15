@@ -541,3 +541,28 @@ def test_propostas_recebidas(con):
         "Clube B", 8320 * MOEDA, 8000 * MOEDA)
     assert {n: p["situacao"] for n, p in ps.items()} == {"Zagueiro": "aberta", "Volante": "encerrada", "Vendido": "saiu"}
     assert (ps["Volante"]["primeira"], ps["Volante"]["ultima"]) == ("2026-01-14", "2026-01-14")
+
+
+
+def test_minutos_e_nota_no_elenco_e_na_sumula(con):
+    banco.gravar_nomes(con, {10: "Titular", 11: "Reserva"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", [
+        partida("2026-02-01", 0, 1, (1, 0), [atuacao(10, 0, 1, 0, 90, 76), atuacao(11, 0, 0, 0, 3, None)]),
+        partida("2026-02-08", 1, 0, (0, 0), [atuacao(10, 1, 0, 0, 90, 60), atuacao(11, 1, 0, 0, 30, 55)]),
+    ], elenco=(10, 11)), AGORA)
+    el = {l["nome"]: (l["minutos"], l["nota"]) for l in banco.elenco(con, 1, 2026)}
+    assert el == {"Titular": (180, 6.8), "Reserva": (33, 5.5)}  # média só das partidas com nota
+    s = banco.partida(con, 1, 1)
+    assert [(e["nome"], e["minutos"], e["nota"]) for e in s["escalacao"]] == [("Titular", 90, 7.6), ("Reserva", 3, None)]
+
+
+def test_banco_sem_minutos_rele_os_saves(tmp_path):
+    caminho = tmp_path / "v.db"
+    banco.conectar(caminho).close()
+    antigo = sqlite3.connect(caminho)
+    antigo.executescript("ALTER TABLE escalacao DROP COLUMN minutos; ALTER TABLE escalacao DROP COLUMN nota;"
+                         "INSERT INTO arquivo VALUES('x/ML00000000', 1, 1.0);")
+    antigo.close()
+    con = banco.conectar(caminho)
+    assert contar(con, "SELECT count(*) FROM arquivo") == 0
+    con.close()

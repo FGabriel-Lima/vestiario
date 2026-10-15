@@ -289,6 +289,8 @@ const COLUNAS = [
   ["jogos", "Jogos", (l) => l.jogos],
   ["gols", "Gols", (l) => l.gols],
   ["assistencias", "Assist.", (l) => l.assistencias],
+  ["minutos", "Min.", (l) => l.minutos ?? 0, false, true],
+  ["nota", "Nota", (l) => l.nota ?? 0, false, true],
   ["valor", "Valor", (l) => l.valor ?? -1, false, true],
   ["salario", "Salário/sem.", (l) => l.contrato?.salario_semanal ?? -1, false, true],
   ["multa", "Multa", (l) => l.contrato?.multa ?? -1, false, true],
@@ -369,6 +371,8 @@ function Elenco({ id, ano, dataJogo }) {
               <td className="text-right font-kit text-xl">{l.jogos}</td>
               <td className="text-right font-kit text-xl">{l.gols}</td>
               <td className="text-right font-kit text-xl">{l.assistencias}</td>
+              <td className="hidden text-right font-kit text-xl sm:table-cell">{l.minutos || ""}</td>
+              <td className="hidden text-right font-kit text-xl sm:table-cell">{l.nota?.toFixed(1)}</td>
               <td className="hidden text-right font-kit text-xl text-gold sm:table-cell">{l.valor ? <Dinheiro valor={l.valor} /> : null}</td>
               <td className="hidden text-right font-kit text-xl sm:table-cell">
                 {/* o save não guarda salário de quem veio emprestado, só o fim do empréstimo */}
@@ -548,6 +552,14 @@ function Folha({ p }) {
                         )}
                         {j.assistencias > 0 && (
                           <span className="font-kit text-base font-semibold uppercase">{j.assistencias} assist.</span>
+                        )}
+                        {j.minutos > 0 && j.minutos < 90 && (
+                          <span title="minutos jogados" className="font-kit text-sm text-pincel/60">{j.minutos}'</span>
+                        )}
+                        {j.nota != null && (
+                          <span title="nota do PES" className="w-8 rounded-sm bg-pincel/10 text-center font-kit text-base font-bold">
+                            {j.nota.toFixed(1)}
+                          </span>
                         )}
                       </li>
                     ))}
@@ -1131,6 +1143,12 @@ function ArteDoPost({ post }) {
             </p>
           </div>
           <div className="font-kit text-sm font-semibold uppercase tracking-wide opacity-85">
+            {d.melhor_em_campo && post.tipo !== "proximo_jogo" && (
+              <p className="mb-1 flex items-center gap-x-2">
+                <span aria-hidden="true" className="icone text-base text-gold">star</span>
+                Melhor em campo: {d.melhor_em_campo.nome} · {d.melhor_em_campo.nota.toFixed(1)}
+              </p>
+            )}
             {d.gols_do_clube?.length > 0 && (
               <p className="mb-1 flex flex-wrap items-center gap-x-2">
                 <span aria-hidden="true" className="icone text-base">sports_soccer</span>

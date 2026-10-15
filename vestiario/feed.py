@@ -41,13 +41,22 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
     posts = []
     post = lambda perfil, tipo, data, dados: posts.append({"perfil": perfil, "tipo": tipo, "data": data, "dados": dados})
 
-    jogados = [p for p in todas if p["disputada"] and (de is None or p["data"] > de) and p["data"] <= ate]
+    # o dia da sincronização anterior entra de novo: o save pode ter sido gravado nesse dia antes do jogo (aconteceu);
+    # jogo que já virou post não se repete
+    ja_postados = {(d["data"], d["mandante"]["idx"], d["visitante"]["idx"]) for d in (
+        json.loads(r[0]) for r in con.execute("SELECT dados FROM post WHERE carreira_id = ? AND tipo = 'fim_de_jogo'", (cid,)))}
+    jogados = [p for p in todas if p["disputada"] and (de is None or p["data"] >= de) and p["data"] <= ate
+               and (p["data"], p["mandante_idx"], p["visitante_idx"]) not in ja_postados]
     for p in jogados[-5:] if de is None else jogados:
         pro, contra = banco._placar(p, clube)
         dados = {"competicao": p["competicao"], "data": p["data"], "mandante": _time(p, "mandante"),
                  "visitante": _time(p, "visitante"), "nosso_lado": "mandante" if p["mandante_idx"] == clube else "visitante",
                  "resultado": "vitória" if pro > contra else "derrota" if pro < contra else "empate",
                  "gols_do_clube": _gols_do_clube(con, p["id"], 0 if p["mandante_idx"] == clube else 1)}
+        if melhor := con.execute("SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id), e.nota FROM escalacao e "
+                                 "LEFT JOIN jogador j ON j.player_id = e.player_id WHERE e.partida_id = ? AND e.nota IS NOT NULL "
+                                 "ORDER BY e.nota DESC LIMIT 1", (p["id"],)).fetchone():
+            dados["melhor_em_campo"] = {"player_id": melhor[0], "nome": melhor[1], "nota": melhor[2] / 10}
         if p["penaltis_mandante"] + p["penaltis_visitante"]:
             dados["penaltis"] = [p["penaltis_mandante"], p["penaltis_visitante"]]
         post("clube", "fim_de_jogo", p["data"], dados)

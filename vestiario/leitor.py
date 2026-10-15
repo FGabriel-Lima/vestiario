@@ -41,6 +41,8 @@ class Atuacao:
     lado: int                        # 0 = mandante, 1 = visitante
     gols: int
     assistencias: int
+    minutos: int = 0                 # nas partidas simuladas pelo jogo, sempre 90 para os 11
+    nota: int | None = None          # em décimos (76 = 7.6); None = jogou pouco e ficou sem nota
 
 
 @dataclass
@@ -274,9 +276,11 @@ def ler_partidas(data: bytes, n_times: int) -> list[Partida]:
             continue
         escalacao = []
         for s in range(VAGAS):
-            vaga, pid, x = struct.unpack_from("<III", data, h + 28 + s * VAGA_TAM)
+            vaga, pid, x, y = struct.unpack_from("<IIII", data, h + 28 + s * VAGA_TAM)
             if vaga != 0xFFFF:
-                escalacao.append(Atuacao(pid & PID, s // 17, x & 0xFF, (x >> 8) & 0xFF))
+                # y: minutos nos bits 0-6 e nota (em décimos) nos bits 7-13; conferido com a tela do PES
+                escalacao.append(Atuacao(pid & PID, s // 17, x & 0xFF, (x >> 8) & 0xFF, y & 0x7F,
+                                         ((y >> 7) & 0x7F) or None))
         p = data[h + 20:h + 26]
         comp, rodada = struct.unpack_from("<HH", data, h + COMPETICAO)
         # o byte alto da competição vem em passos de 4 (4 = grupo A, 8 = B…)

@@ -35,5 +35,5 @@ def fazer_save(data_jogo="2026-03-01", partidas=(), elenco=(10, 11, 12), nome="L
                 competicoes=dict(competicoes or {}), propostas=[Proposta(*p) for p in propostas])
 
 
-def atuacao(pid, lado, gols=0, assist=0) -> Atuacao:
-    return Atuacao(pid, lado, gols, assist)
+def atuacao(pid, lado, gols=0, assist=0, minutos=90, nota=60) -> Atuacao:
+    return Atuacao(pid, lado, gols, assist, minutos, nota)

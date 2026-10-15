@@ -25,8 +25,9 @@ def escrever_partida(data, i, ano, mes, dia, mandante, visitante, placar=b"\0" *
     data[h + 20:h + 26] = placar
     for s in range(34):
         struct.pack_into("<I", data, h + 28 + s * 16, 0xFFFF)
-    for s, pid, gols, assist in vagas:
-        struct.pack_into("<IIII", data, h + 28 + s * 16, 1, pid, gols | assist << 8, 0)
+    for s, pid, gols, assist, *extra in vagas:
+        minutos, nota = extra or (90, 60)
+        struct.pack_into("<IIII", data, h + 28 + s * 16, 1, pid, gols | assist << 8, minutos | nota << 7 | 96 << 16)
     struct.pack_into("<HH", data, h + 592, competicao, rodada)
 
 
@@ -51,8 +52,18 @@ def test_partidas_sinteticas():
     assert (p.data, p.mandante, p.visitante, p.gols, p.disputada) == (date(2026, 1, 22), 1, 2, (2, 1), True)
     assert [(a.player_id, a.lado, a.gols, a.assistencias) for a in p.escalacao] == [
         (500, 0, 2, 0), (600, 1, 1, 0), (601, 1, 0, 1)]
+    assert [(a.minutos, a.nota) for a in p.escalacao] == [(90, 60), (90, 60), (90, 60)]
     assert ps[1].disputada is False
     assert (ps[1].competicao, ps[1].grupo, ps[1].rodada) == (9, 3, 3)
+
+
+def test_minutos_e_nota_da_escalacao():
+    # São Paulo 0 x 1 Botafogo (Liga Master 04): Cabral 90' nota 7.6; Montoro saiu aos 87'; Martins jogou 3' sem nota
+    data = tabela_vazia()
+    escrever_partida(data, 0, 2026, 1, 22, 1, 2, bytes([0, 0, 0, 1, 0, 0]),
+                     [(17, 700, 1, 0, 90, 76), (18, 701, 0, 0, 87, 50), (19, 702, 0, 0, 3, 0)])
+    (p,) = ler_partidas(bytes(data), n_times=3)
+    assert [(a.minutos, a.nota) for a in p.escalacao] == [(90, 76), (87, 50), (3, None)]
 
 
 def test_tabela_de_competicoes():
