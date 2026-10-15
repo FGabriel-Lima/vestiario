@@ -1228,6 +1228,28 @@ function ArteDoPost({ post }) {
         </div>
       );
     }
+    case "mundo":
+      return (
+        <div className={base}>
+          {selo("Tá fechado!", "text-gold text-3xl tracking-normal")}
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Rosto id={d.player_id} className="size-36 ring-4 ring-gold" />
+            <p className="font-kit text-4xl font-extrabold uppercase leading-none">{d.nome}</p>
+          </div>
+          <div className="flex items-center justify-between gap-3 font-kit text-base font-semibold uppercase">
+            <span className="flex min-w-0 items-center gap-2">
+              {d.de ? <Escudo id={d.de.escudo} nome={d.de.nome} className="size-8" /> : <span className="text-muted">sem clube</span>}
+              <span aria-hidden="true" className="icone text-gold">arrow_forward</span>
+              <Escudo id={d.para.escudo} nome={d.para.nome} className="size-8" />
+              <span className="truncate">{d.para.nome}</span>
+            </span>
+            <span className="text-right text-sm normal-case opacity-80">
+              valor de mercado
+              <Dinheiro valor={d.valor_de_mercado} className="block font-kit text-2xl font-extrabold text-gold" />
+            </span>
+          </div>
+        </div>
+      );
     case "proposta":
       return (
         <div className={base}>

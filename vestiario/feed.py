@@ -88,6 +88,9 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
             post("clube", tipo, ate, {**jogador(x), lado: outro, **({"fim_de_contrato": True} if x.get("fim_de_contrato") else {}),
                                       "jogos_pelo_clube": x["jogos"], "gols_pelo_clube": x["gols"]})
 
+    for x in banco.movimentos_do_mundo(con, cid):
+        post("mercadodabola", "mundo", ate, x)
+
     for x in banco.propostas(con, cid):
         if (de is None or x["primeira"] > de) and x["primeira"] <= ate:
             post("geglobo", "proposta", x["primeira"], {
@@ -130,6 +133,7 @@ Cada post já tem o perfil que publica, o tipo e os fatos. Escreva uma legenda p
 - "tntsportsbr": canal de TV esportivo. Descontraído, com humor leve em goleada (sem ofender), direto nos números.
 - "geglobo": portal de notícias. Tom jornalístico: "INFORMAÇÃO", "o ge apurou", proposta recebida, contrato vencendo.
 - "mercadodabola": perfil de mercado. Curto, começa com "Tá fechado! ✅" quando a transferência está concluída.
+  Nos posts "mundo" o valor pago é desconhecido: cite só o valor de mercado, nunca como preço da transferência.
 
 Regras, sem exceção:
 - Use SOMENTE os fatos de cada post. Não cite pessoas, clubes, números, lesões, declarações, bastidores, intenções
@@ -161,6 +165,8 @@ def legenda_padrao(post: dict) -> str:
         return f"Próximo jogo: {d['mandante']['nome']} x {d['visitante']['nome']}."
     if t == "classificacao":
         return f"Classificação do {d['competicao']} depois de {d['rodadas_jogadas']} rodadas."
+    if t == "mundo":
+        return f"{d['nome']} agora é do {d['para']['nome']}."
     if t in ("chegada", "saida", "fechado"):
         return f"{d['nome']}: {'chegou' if t == 'chegada' or d.get('movimento') == 'chegada' else 'saiu'}."
     if t == "proposta":

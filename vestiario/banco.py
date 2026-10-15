@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS elenco(
 -- clube de cada jogador do mundo naquela sincronização (origem e destino das transferências)
 CREATE TABLE IF NOT EXISTS vinculo(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, time_idx INTEGER NOT NULL,
-  PRIMARY KEY(sincronizacao_id, player_id));
+  valor INTEGER, PRIMARY KEY(sincronizacao_id, player_id));
 -- livro de transferências do clube; o save zera o livro, o banco guarda cada negócio com a 1ª data do jogo em que apareceu
 CREATE TABLE IF NOT EXISTS negocio(
   carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, tipo INTEGER NOT NULL,
@@ -86,6 +86,10 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
             con.execute("DELETE FROM arquivo")
     if "posicao" not in {r[1] for r in con.execute("PRAGMA table_info(jogador)")}:
         con.execute("ALTER TABLE jogador ADD COLUMN posicao INTEGER")  # preenchida na próxima sincronização
+    if "valor" not in {r[1] for r in con.execute("PRAGMA table_info(vinculo)")}:
+        with con:  # banco anterior ao valor dos jogadores do mundo e às seleções: relê os saves
+            con.execute("ALTER TABLE vinculo ADD COLUMN valor INTEGER")
+            con.execute("DELETE FROM arquivo")
     if "minutos" not in {r[1] for r in con.execute("PRAGMA table_info(escalacao)")}:
         with con:  # banco anterior aos minutos e notas: relê os saves para preenchê-los
             con.execute("ALTER TABLE escalacao ADD COLUMN minutos INTEGER NOT NULL DEFAULT 0")
@@ -150,6 +154,17 @@ def marcar_arquivo(con: sqlite3.Connection, caminho: str, tamanho: int, mtime: f
                     "SET tamanho = excluded.tamanho, mtime = excluded.mtime", (caminho, tamanho, mtime))
 
 
+def selecoes(elencos: list[list[int]]) -> set[int]:
+    """Seleções: na tabela de times elas vêm depois dos clubes, e os convocados delas já apareceram num clube de
+    índice menor. Um clube cheio de convocados não engana: os jogadores dele só reaparecem em índices maiores."""
+    visto, nacionais = set(), set()
+    for idx, pids in enumerate(elencos):
+        if pids and sum(p in visto for p in pids) / len(pids) >= 0.6:
+            nacionais.add(idx)
+        visto |= set(pids)
+    return nacionais
+
+
 def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict:
     """Grava um save numa transação. Partida disputada nunca regride; jogos futuros vêm só do save mais recente."""
     with con:
@@ -178,10 +193,13 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
         con.execute("DELETE FROM vinculo WHERE sincronizacao_id IN (SELECT id FROM sincronizacao "
                     "WHERE carreira_id = ? AND data_jogo = ? AND id <> ?)", (cid, save.data_jogo.isoformat(), sid))
         clube_de = {}
+        nacionais = selecoes(save.elencos)
         for idx, pids in enumerate(save.elencos):
-            for pid in pids:
-                clube_de.setdefault(pid, idx)  # na tabela de times os clubes vêm antes das seleções
-        con.executemany("INSERT INTO vinculo VALUES(?, ?, ?)", [(sid, p, i) for p, i in clube_de.items()])
+            if idx not in nacionais:  # quem só aparece numa seleção está sem clube
+                for pid in pids:
+                    clube_de.setdefault(pid, idx)
+        con.executemany("INSERT INTO vinculo VALUES(?, ?, ?, ?)",
+                        [(sid, p, i, save.valores.get(p)) for p, i in clube_de.items()])
         con.executemany("INSERT INTO proposta VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE "
                         "SET primeira = min(primeira, excluded.primeira), ultima = max(ultima, excluded.ultima)",
                         [(cid, p.player_id, p.clube, p.valor, save.data_jogo.isoformat(), save.data_jogo.isoformat())
@@ -727,9 +745,39 @@ def mundo(con: sqlite3.Connection, cid: int, ano: int, limite: int = 20) -> dict
     return {"partidas": jogos, "artilheiros": top("gols", "assistencias"), "garcons": top("assistencias", "gols")}
 
 
+def movimentos_do_mundo(con: sqlite3.Connection, cid: int, minimo: int = 10_000_000, limite: int = 5) -> list[dict]:
+    """Jogadores de outros clubes que mudaram de clube entre a sincronização anterior (outra data do jogo) e a mais
+    recente, os de maior valor de mercado primeiro (minimo em R$). O save não tem o valor pago, só o de mercado."""
+    s = _ultima(con, cid)
+    antes = con.execute("SELECT max(id) FROM sincronizacao WHERE carreira_id = ? AND data_jogo = (SELECT max(data_jogo) "
+                        "FROM sincronizacao WHERE carreira_id = ? AND data_jogo < ?)", (cid, cid, s["data_jogo"])).fetchone()[0]
+    if antes is None:
+        return []
+    clube = s["clube_idx"]
+    time = lambda idx: (con.execute("SELECT nome, pes_id FROM time WHERE carreira_id = ? AND idx = ?", (cid, idx)).fetchone()
+                        if idx is not None else None)
+    lista = []
+    for r in con.execute(
+            "SELECT n.player_id, coalesce(j.nome, 'Jogador #' || n.player_id) AS nome, j.posicao, a.time_idx AS de,"
+            " n.time_idx AS para, n.valor FROM vinculo n LEFT JOIN vinculo a ON a.sincronizacao_id = ? AND a.player_id ="
+            " n.player_id LEFT JOIN jogador j ON j.player_id = n.player_id WHERE n.sincronizacao_id = ?"
+            " AND (a.time_idx IS NULL OR a.time_idx <> n.time_idx) AND n.valor * ? >= ? ORDER BY n.valor DESC",
+            (antes, s["id"], MOEDA, minimo)):
+        if clube in (r["de"], r["para"]):  # as do próprio clube já viram post de chegada e saída
+            continue
+        de, para = time(r["de"]), time(r["para"])
+        lista.append({"player_id": r["player_id"], "nome": r["nome"],
+                      "posicao": POSICOES[r["posicao"]] if r["posicao"] is not None else None,
+                      "de": {"nome": de[0], "escudo": de[1]} if de else None,
+                      "para": {"nome": para[0], "escudo": para[1]}, "valor_de_mercado": r["valor"] * MOEDA})
+        if len(lista) == limite:
+            break
+    return lista
+
+
 def rostos(con: sqlite3.Connection) -> set[int]:
-    """Quem passou pelo clube de alguma carreira (elenco ou escalação) e os líderes da artilharia do mundo,
-    para extrair as minifaces."""
+    """Quem passou pelo clube de alguma carreira (elenco ou escalação), os líderes da artilharia do mundo e as
+    grandes transferências do mundo, para extrair as minifaces."""
     ids = {r[0] for r in con.execute("SELECT DISTINCT player_id FROM elenco")}
     for (cid,) in con.execute("SELECT id FROM carreira").fetchall():
         if s := _ultima(con, cid):
@@ -737,6 +785,7 @@ def rostos(con: sqlite3.Connection) -> set[int]:
             for ano in temporadas(con, cid):
                 m = mundo(con, cid, ano)
                 ids |= {l["player_id"] for l in m["artilheiros"] + m["garcons"]}
+            ids |= {x["player_id"] for x in movimentos_do_mundo(con, cid)}
     return ids
 
 

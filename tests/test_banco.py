@@ -566,3 +566,19 @@ def test_banco_sem_minutos_rele_os_saves(tmp_path):
     con = banco.conectar(caminho)
     assert contar(con, "SELECT count(*) FROM arquivo") == 0
     con.close()
+
+
+
+def test_selecoes_e_movimentos_do_mundo(con):
+    from vestiario.banco import selecoes
+    # times: A (clube do usuário), B e C clubes, e uma seleção (índice 3) com convocados de B e C
+    elencos = [[10], [20, 21], [30], [20, 30]]
+    assert selecoes(elencos) == {3}
+    salvar = lambda data, elencos, valores: banco.gravar(con, "ML00000000", fazer_save(
+        data, elenco=elencos[0], outros=elencos[1:], valores=valores, times4=True), AGORA)
+    salvar("2026-01-01", elencos, {20: 30000, 21: 100, 30: 50000})
+    # 20 sai do B para o C; 21 fica sem clube (só na seleção, não vira "transferência para a seleção")
+    salvar("2026-02-01", [[10], [], [30, 20], [20, 30, 21]], {20: 30000, 21: 100, 30: 50000})
+    m = banco.movimentos_do_mundo(con, 1, minimo=0)
+    assert [(x["player_id"], x["de"] and x["de"]["nome"], x["para"]["nome"], x["valor_de_mercado"]) for x in m] == [
+        (20, "Clube B", "Clube C", 30000 * MOEDA)]
