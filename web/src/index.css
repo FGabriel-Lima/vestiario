@@ -181,6 +181,22 @@ body {
   border-top: 2px solid var(--color-giz);
 }
 
+/* Sala de troféus: a prateleira de madeira escura do vestiário; vazia, fica só o traço de giz */
+.prateleira {
+  padding-top: 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 10px solid var(--color-pitch-700);
+  box-shadow: 0 12px 14px -10px rgb(0 0 0 / 0.7);
+}
+.prateleira-vazia {
+  border-bottom: 3px dashed var(--color-giz);
+  box-shadow: none;
+}
+.taca {
+  font-size: 4.5rem;
+  filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.5));
+}
+
 /* Súmula: folha de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
 .sumula {
   width: min(100% - 2rem, 46rem);

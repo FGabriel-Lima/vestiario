@@ -578,6 +578,7 @@ function Edicao({ id, chave, clube }) {
         <h2 className="font-kit text-4xl font-extrabold uppercase leading-none sm:text-5xl">{e.nome}</h2>
         <span className="fita text-xl">{e.temporada}</span>
       </header>
+      {e.campeao && <FaixaDeCampeao campeao={e.campeao} vice={e.vice} clube={clube} />}
 
       {e.fases.map((f, i) =>
         f.tipo === "jogos" && f.titulo !== "Fase preliminar" && e.chaveamento.length > 0 ? null : f.tipo === "tabela" ? (
@@ -588,6 +589,16 @@ function Edicao({ id, chave, clube }) {
                 {f.rodadas_jogadas} de {plural(f.rodadas_total, "rodada", "rodadas")} jogadas
               </p>
             </div>
+            {f.incompleta && (
+              <p className="mb-4 flex items-start gap-2 rounded-md border-l-4 border-gold bg-pitch-900 px-4 py-3 text-sm">
+                <span aria-hidden="true" className="icone text-gold">history</span>
+                <span>
+                  O Vestiário tem {f.rodadas_jogadas} das {f.rodadas_total} rodadas. As outras já tinham saído do save do PES
+                  quando ele foi sincronizado, então esta tabela não é a final. Sincronize ao longo da temporada para guardar
+                  todas as rodadas.
+                </span>
+              </p>
+            )}
             <div className={f.grupos.length > 1 ? "grid grid-cols-1 gap-x-8 gap-y-10 lg:grid-cols-2" : ""}>
               {f.grupos.map((g, k) => (
                 <Classificacao key={k} titulo={g.titulo} linhas={g.linhas} clube={clube} compacta={f.grupos.length > 1} />
@@ -999,6 +1010,7 @@ function Lendas({ id, clube }) {
   ];
   return (
     <>
+      <SalaDeTrofeus id={id} clube={clube} />
       <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
         {rankings.map(([titulo, campo, unidade, lista]) => (
           <section key={titulo} className="rounded-md bg-pitch-900 p-5">
@@ -1110,7 +1122,107 @@ function PeloMundo({ id, ano, clube }) {
         <RankingMundo titulo="Artilheiros" campo="gols" lista={m.artilheiros} clube={clube} />
         <RankingMundo titulo="Garçons" campo="assistencias" lista={m.garcons} clube={clube} />
       </div>
+      <CampeoesDoAno id={id} ano={ano} clube={clube} />
     </>
+  );
+}
+
+// "2025/26" vale para 2025 e para 2026
+const daTemporada = (temporada, ano) => temporada.startsWith(String(ano)) || temporada.endsWith(`/${String(ano).slice(2)}`);
+
+function CampeoesDoAno({ id, ano, clube }) {
+  const { dados: titulos } = useDados(() => api.titulos(id), [id]);
+  if (!titulos) return null;
+  const doAno = titulos.filter((t) => daTemporada(t.temporada, ano));
+  return (
+    <section className="mt-14">
+      <h2 className="mb-1 font-kit text-2xl font-semibold uppercase">Campeões</h2>
+      <p className="mb-4 max-w-2xl text-sm text-muted">
+        Competições de {ano} já decididas no save: a final jogada ou a liga com todos os jogos no Vestiário.
+      </p>
+      {doAno.length === 0 ? (
+        <p className="text-muted">Nenhuma competição de {ano} decidida ainda.</p>
+      ) : (
+        <ul className="divide-y divide-pitch-800">
+          {doAno.map((t) => {
+            const nosso = t.campeao.idx === clube;
+            return (
+              <li key={t.chave} className={`grid grid-cols-1 gap-x-6 gap-y-1 border-l-4 py-2.5 pl-3 sm:grid-cols-[1fr_1.2fr] ${nosso ? "border-gold bg-pitch-900" : "border-transparent"}`}>
+                <span className="min-w-0 truncate text-muted">
+                  {t.nome} <span className="font-kit">{t.temporada}</span>
+                </span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span aria-hidden="true" className="icone text-base text-gold">emoji_events</span>
+                  <Escudo id={t.campeao.escudo} nome={t.campeao.nome} className="size-5" />
+                  <span className={`truncate font-semibold ${nosso ? "text-destaque" : ""}`}>{t.campeao.nome}</span>
+                  <span className="truncate text-sm text-muted">· vice {t.vice.nome}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function FaixaDeCampeao({ campeao, vice, clube }) {
+  return (
+    <div className="mb-10 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-md border-l-4 border-gold bg-pitch-900 px-5 py-4">
+      <span aria-hidden="true" className="icone text-gold" style={{ fontSize: "3rem" }}>emoji_events</span>
+      <Escudo id={campeao.escudo} nome={campeao.nome} className="size-12 drop-shadow-lg" />
+      <div className="min-w-0">
+        <p className="font-kit text-sm font-semibold uppercase tracking-[0.2em] text-gold">Campeão</p>
+        <p className={`truncate font-kit text-3xl font-extrabold uppercase leading-tight ${campeao.idx === clube ? "text-destaque" : ""}`}>
+          {campeao.nome}
+        </p>
+      </div>
+      {vice && (
+        <p className="flex items-center gap-2 text-muted sm:ml-auto">
+          <Escudo id={vice.escudo} nome={vice.nome} className="size-6" />
+          vice: <span className={vice.idx === clube ? "text-destaque" : "text-chalk"}>{vice.nome}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Assinatura dos títulos: a prateleira do vestiário, com as taças em pé e o rótulo de fita crepe embaixo de cada uma
+function SalaDeTrofeus({ id, clube }) {
+  const { dados: titulos } = useDados(() => api.titulos(id), [id]);
+  if (!titulos) return null;
+  const nossos = titulos.filter((t) => t.campeao.idx === clube);
+  const vices = titulos.filter((t) => t.vice?.idx === clube);
+  return (
+    <section className="mb-14" aria-labelledby="sala-de-trofeus">
+      <h2 id="sala-de-trofeus" className="mb-5 font-kit text-3xl font-semibold uppercase">
+        Sala de troféus
+      </h2>
+      <div className={`prateleira ${nossos.length ? "" : "prateleira-vazia"}`}>
+        {nossos.length > 0 ? (
+          <ul className="flex flex-wrap items-end gap-x-8 gap-y-10 px-2">
+            {nossos.map((t, i) => (
+              <li key={t.chave} className="flex w-36 flex-col items-center text-center">
+                <span aria-hidden="true" className="icone taca text-gold">emoji_events</span>
+                <span className="fita mt-3 text-sm" style={{ "--giro": `${i % 2 ? 1.5 : -2}deg` }}>
+                  {t.nome} {t.temporada}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="max-w-xl px-2 pb-1 text-muted">
+            Nenhum título confirmado ainda. O Vestiário só conta um título quando tem o campeonato inteiro: a final jogada
+            ou todas as rodadas da liga. Sincronize ao longo da temporada para nenhuma rodada se perder.
+          </p>
+        )}
+      </div>
+      {vices.length > 0 && (
+        <p className="mt-4 text-sm text-muted">
+          Vice: {vices.map((t) => `${t.nome} ${t.temporada}`).join(" · ")}
+        </p>
+      )}
+    </section>
   );
 }
 

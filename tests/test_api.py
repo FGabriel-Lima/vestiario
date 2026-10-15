@@ -38,6 +38,7 @@ def test_telas(cliente):
     assert cliente.get("/api/carreiras/1/mundo?ano=2026").json()["artilheiros"][0]["gols"] == 2
     assert cliente.get("/api/carreiras/9").status_code == 404
     assert cliente.get("/api/carreiras/1/campeonatos").json() == []
+    assert cliente.get("/api/carreiras/1/titulos").json() == []
     assert cliente.get("/api/carreiras/1/campeonato", params={"chave": "Nada|2026"}).status_code == 404
 
 

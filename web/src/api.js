@@ -18,6 +18,7 @@ export const api = {
   transferencias: (id) => pedir(`/carreiras/${id}/transferencias`),
   mundo: (id, ano) => pedir(`/carreiras/${id}/mundo?ano=${ano}`),
   campeonatos: (id) => pedir(`/carreiras/${id}/campeonatos`),
+  titulos: (id) => pedir(`/carreiras/${id}/titulos`),
   campeonato: (id, chave) => pedir(`/carreiras/${id}/campeonato?chave=${encodeURIComponent(chave)}`),
 };
 

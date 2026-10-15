@@ -304,7 +304,8 @@ def test_banco_sem_idade_ganha_a_coluna_e_rele_os_saves(tmp_path):
     con.close()
 
 
-COMPETICOES = {29: "Brasileirão Série A", 31: "Copa do Brasil", 9: "Copa Libertadores", 10: "Copa Libertadores"}
+COMPETICOES = {29: "Brasileirão Série A", 31: "Copa do Brasil", 9: "Copa Libertadores", 10: "Copa Libertadores",
+               30: "Brasileirão Série B"}
 
 
 def test_campeonatos(con):
@@ -461,3 +462,61 @@ def test_empate_triplo_sem_confronto_entre_dois_deles_nao_divide_com_quem_tem_ma
              jogo_de_copa(5, "2026-01-27", 2, 6, 1, 0)]   # C 1 x 0 G
     pos = {l["nome"]: l["posicao"] for l in banco._classificacao(jogos)}
     assert (pos["Time A"], pos["Time B"], pos["Time C"]) == (3, 4, 4)  # D e F dividem o 1º; A à frente; B e C dividem
+
+
+def test_fases_da_mesma_competicao_em_anos_seguidos_sao_uma_edicao(con):
+    # Champions: grupos (id 3) no fim de 2025 e mata-mata (id 4) no começo de 2026; em set/2026 começa outra edição
+    banco.gravar(con, "ML00000000", fazer_save("2026-10-01", [
+        partida("2025-09-15", 0, 1, (1, 0), [atuacao(10, 0)], comp=3, grupo=1, rodada=0),
+        partida("2025-12-08", 1, 0, (0, 0), [atuacao(10, 1)], comp=3, grupo=1, rodada=5),
+        partida("2026-02-24", 0, 2, (2, 1), [atuacao(10, 0)], comp=4, rodada=46),
+        partida("2026-09-15", 2, 0, (1, 1), [atuacao(10, 1)], comp=3, grupo=1, rodada=0),
+    ], competicoes={3: "UEFA Champions League", 4: "UEFA Champions League"}), AGORA)
+    assert [(e["nome"], e["temporada"]) for e in banco.edicoes(con, 1)] == [
+        ("UEFA Champions League", "2026"), ("UEFA Champions League", "2025/26")]
+    fases = banco.edicao(con, 1, "UEFA Champions League|2025/26")["fases"]
+    assert [f["titulo"] for f in fases] == ["Fase de grupos", "1ª fase"]
+
+
+def test_titulos(con):
+    liga = lambda dia, m, v, gols, r: partida(dia, m, v, gols, [atuacao(10, 0)], comp=29, rodada=r)
+    banco.gravar(con, "ML00000000", fazer_save("2026-06-01", [
+        # liga de 2025 completa (turno inteiro com 3 times: cada um joga 2): B campeão, C vice
+        liga("2025-04-01", 1, 0, (2, 0), 0), liga("2025-04-08", 2, 1, (0, 1), 1), liga("2025-04-15", 0, 2, (1, 1), 2),
+        # Série B de 2025 só com parte dos jogos no banco (o save apagou o começo): sem campeão
+        partida("2025-09-01", 1, 2, (1, 0), [atuacao(50, 0)], comp=30, rodada=20),
+        partida("2025-09-08", 0, 1, (2, 0), [atuacao(10, 0)], comp=30, rodada=21),
+        # liga de 2026 em andamento: sem campeão
+        liga("2026-04-05", 0, 1, (3, 1), 0), partida("2026-04-19", 2, 0, comp=29, rodada=1),
+        # copa: final nos pênaltis, A campeão sobre B
+        partida("2026-05-20", 0, 1, (0, 0), [atuacao(10, 0)], (4, 3), comp=31, rodada=53),
+    ], competicoes=COMPETICOES), AGORA)
+    t = banco.titulos(con, 1)
+    assert [(x["nome"], x["temporada"], x["campeao"]["nome"], x["vice"]["nome"]) for x in t] == [
+        ("Copa do Brasil", "2026", "Clube A", "Clube B"), ("Brasileirão Série A", "2025", "Clube B", "Clube C")]
+
+
+def test_final_do_mundial_gravada_como_champions_volta_para_o_mundial(con):
+    # Mundial: A 3 x 0 B em 16/12 (id 1); a final A 0 x 2 C em 19/12 veio com o id do mata-mata da Champions (4)
+    banco.gravar(con, "ML00000000", fazer_save("2026-04-01", [
+        partida("2025-12-16", 0, 1, (3, 0), [atuacao(10, 0)], comp=1, rodada=53),
+        partida("2025-12-19", 0, 2, (0, 2), [atuacao(10, 0)], comp=4, rodada=46),
+        partida("2026-02-24", 1, 2, (1, 0), [atuacao(50, 0)], comp=4, rodada=46),
+        partida("2026-03-17", 2, 1, (2, 0), [atuacao(50, 1)], comp=4, rodada=46),
+    ], competicoes={1: "FIFA Club World Cup", 4: "UEFA Champions League"}), AGORA)
+    mundial = banco.edicao(con, 1, "FIFA Club World Cup|2025")
+    assert [c["titulo"] for c in mundial["chaveamento"]] == ["1ª fase", "Final"]
+    assert (mundial["campeao"]["nome"], mundial["vice"]["nome"]) == ("Clube C", "Clube A")
+    champions = banco.edicao(con, 1, "UEFA Champions League|2026")
+    assert [len(c["confrontos"]) for c in champions["chaveamento"]] == [1]  # só B x C, com ida e volta
+
+
+def test_liga_com_rodadas_que_sairam_do_save():
+    # 4 times, liga encerrada no banco com 2 jogos por time: não fecha turno (3) nem ida e volta (6)
+    jogo = lambda pid, r, m, v: {**jogo_de_copa(pid, f"2025-0{r + 1}-01", m, v, 1, 0), "rodada": r, "grupo": 0}
+    parte = [jogo(1, 0, 0, 1), jogo(2, 0, 2, 3), jogo(3, 1, 0, 2), jogo(4, 1, 1, 3)]
+    (fase,) = banco._fases([parte])
+    assert (fase["rodadas_jogadas"], fase["rodadas_total"], fase["incompleta"]) == (2, 3, True)
+    parte += [jogo(5, 2, 0, 3), jogo(6, 2, 1, 2)]  # turno completo: nada falta
+    (fase,) = banco._fases([parte])
+    assert (fase["rodadas_jogadas"], fase["rodadas_total"], fase["incompleta"]) == (3, 3, False)

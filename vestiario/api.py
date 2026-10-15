@@ -144,6 +144,13 @@ def get_campeonato(cid: int, chave: str):
         return e
 
 
+@app.get("/api/carreiras/{cid}/titulos")
+def get_titulos(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return banco.titulos(con, cid)
+
+
 @app.get("/api/carreiras/{cid}/lendas")
 def get_lendas(cid: int):
     with _con() as con:
