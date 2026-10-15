@@ -3,10 +3,10 @@ import { api, dataBR } from "./api.js";
 import Escudo from "./Escudo.jsx";
 import Rosto from "./Rosto.jsx";
 
-const ABAS = ["Visão geral", "Jornal", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
+const ABAS = ["Visão geral", "Feed", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
 // Abas que olham a carreira inteira e não usam o seletor de temporada
 // (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
-const DA_CARREIRA = new Set(["Jornal", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
+const DA_CARREIRA = new Set(["Feed", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
 
 const GRAMADO = "#0b1a10"; // --color-pitch-950
 const canais = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -129,7 +129,7 @@ export default function Carreira({ id, onVoltar }) {
             )}
             {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} />}
             {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
-            {aba === "Jornal" && <Jornal id={id} clube={carreira.clube_nome} />}
+            {aba === "Feed" && <Feed id={id} />}
             {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} />}
             {aba === "Transferências" && <Transferencias id={id} />}
             {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
@@ -809,130 +809,253 @@ function Classificacao({ titulo, linhas, clube, compacta }) {
   );
 }
 
-const DATA_EXTENSA = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-const extensa = (iso) => DATA_EXTENSA.format(new Date(`${iso}T00:00:00Z`));
+// Feed: posts dos perfis que acompanham o clube. A arte de cada post é montada com os dados reais (placar, escudos,
+// rostos, valores) na linguagem visual de cada perfil; a IA só escreveu a legenda.
+const AVATAR = {
+  tntsportsbr: ["TNT", "bg-[#d71920] text-white"],
+  geglobo: ["ge", "bg-[#06aa48] text-white"],
+  mercadodabola: ["MB", "bg-pitch-950 text-gold ring-1 ring-gold"],
+};
 
-// Assinatura do jornal: a capa de um diário esportivo popular, impressa e colada na parede do vestiário com fita
-// crepe. O cabeçalho sai nas cores do clube (como a capa do jornal do clube), a manchete é o maior texto do app.
-function Jornal({ id, clube }) {
+function Feed({ id }) {
   const [versao, setVersao] = useState(0);
-  const { dados: j, erro } = useDados(() => api.jornal(id), [id, versao]);
-  const [escolhida, setEscolhida] = useState(null);
-  const [rodando, setRodando] = useState(false);
+  const { dados: f, erro } = useDados(() => api.feed(id), [id, versao]);
+  const [publicando, setPublicando] = useState(false);
   const [falha, setFalha] = useState(null);
   if (erro) return <Erro mensagem={erro} />;
-  if (!j) return null;
-  const rodar = () => {
-    setRodando(true);
+  if (!f) return null;
+  const publicar = () => {
+    setPublicando(true);
     setFalha(null);
     api
-      .rodarJornal(id)
-      .then((e) => {
-        setEscolhida(e.data_jogo);
-        setVersao((v) => v + 1);
-      })
+      .atualizarFeed(id)
+      .then(() => setVersao((v) => v + 1))
       .catch((e) => setFalha(e.message))
-      .finally(() => setRodando(false));
+      .finally(() => setPublicando(false));
   };
-  const edicao = j.edicoes.find((e) => e.data_jogo === escolhida) ?? j.edicoes[0];
   return (
-    <>
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        {j.edicoes.length > 1 && (
-          <label className="flex flex-col gap-1">
-            <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Edição</span>
-            <select
-              value={edicao.data_jogo}
-              onChange={(e) => setEscolhida(e.target.value)}
-              className="rounded-md border border-pitch-700 bg-pitch-800 px-3 py-2 font-kit text-lg uppercase"
+    <div className="mx-auto max-w-lg">
+      {!f.publicado && (
+        <div aria-live="polite" className="mb-8 rounded-md border border-dashed border-pitch-700 p-4">
+          {publicando ? (
+            <p className="flex items-center gap-2 text-muted">
+              <span aria-hidden="true" className="icone animate-spin text-gold motion-reduce:animate-none">progress_activity</span>
+              Os perfis estão postando. Pode levar até meio minuto.
+            </p>
+          ) : (
+            <button
+              onClick={publicar}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110"
             >
-              {j.edicoes.map((e) => (
-                <option key={e.data_jogo} value={e.data_jogo}>
-                  {dataBR(e.data_jogo)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {!j.rodada && (
-          <div aria-live="polite" className="flex flex-col items-start gap-2">
-            {rodando ? (
-              <p className="flex items-center gap-2 text-muted">
-                <span aria-hidden="true" className="icone animate-pulse text-gold motion-reduce:animate-none">
-                  newspaper
-                </span>
-                A redação está fechando a edição. Pode levar até meio minuto.
-              </p>
-            ) : (
-              <button
-                onClick={rodar}
-                className="flex items-center gap-2 rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110"
-              >
-                <span aria-hidden="true" className="icone">
-                  newspaper
-                </span>
-                Rodar a edição de {dataBR(j.atual)}
-              </button>
-            )}
-            {falha && <p className="text-sm text-cartao">{falha}</p>}
-          </div>
-        )}
-      </div>
-
-      {edicao ? (
-        <CapaDoJornal edicao={edicao} clube={clube} />
-      ) : (
-        !rodando && (
-          <p className="max-w-xl text-muted">
-            Ainda não saiu nenhuma edição. Rode a primeira: a redação escreve sobre o que aconteceu com o {clube} até
-            o save de {dataBR(j.atual)}, só com o que está no save.
-          </p>
-        )
+              <span aria-hidden="true" className="icone">refresh</span>
+              Carregar os posts do save de {dataBR(f.atual)}
+            </button>
+          )}
+          {falha && <p className="mt-2 text-sm text-cartao">{falha}</p>}
+        </div>
       )}
-    </>
+      {f.posts.length === 0 ? (
+        <p className="text-muted">Nenhum post ainda. Carregue os posts do save mais recente.</p>
+      ) : (
+        <ol className="space-y-10">
+          {f.posts.map((p) => (
+            <li key={`${p.edicao}-${p.perfil}-${p.tipo}-${p.data}-${p.dados.player_id ?? ""}-${p.dados.mandante?.idx ?? ""}`}>
+              <Post post={p} perfis={f.perfis} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 
-function CapaDoJornal({ edicao, clube }) {
-  const { manchete, linha_fina, materias } = edicao.conteudo;
-  const [principal, ...outras] = materias;
+function Post({ post, perfis }) {
+  const perfil = perfis[post.perfil] ?? perfis.clube;
+  const [sigla, cor] = AVATAR[post.perfil] ?? [];
   return (
-    <article className="jornal mx-auto max-w-4xl" aria-label={`Gazeta do Vestiário de ${extensa(edicao.data_jogo)}`}>
-      <span aria-hidden="true" className="fita absolute -top-4 left-6 z-10 h-8 w-24" style={{ "--giro": "-6deg" }} />
-      <span aria-hidden="true" className="fita absolute -top-4 right-6 z-10 h-8 w-24" style={{ "--giro": "5deg" }} />
-      <header className="jornal-cabecalho">
-        <p className="font-kit text-4xl font-extrabold uppercase leading-none tracking-tight sm:text-6xl">Gazeta do Vestiário</p>
-        <p className="mt-2 flex flex-wrap justify-between gap-x-6 font-kit text-sm font-semibold uppercase tracking-wide">
-          <span>{extensa(edicao.data_jogo)}</span>
-          <span>{edicao.de ? `Cobre de ${dataBR(edicao.de)} a ${dataBR(edicao.data_jogo)}` : `Primeira edição · ${clube}`}</span>
+    <article className="overflow-hidden rounded-xl border border-pitch-800 bg-pitch-900">
+      <header className="flex items-center gap-3 px-4 py-3">
+        {post.perfil === "clube" ? (
+          <span className="grid size-10 place-items-center rounded-full bg-pitch-950 ring-2 ring-destaque">
+            <Escudo id={perfil.escudo} nome={perfil.nome} className="size-7" />
+          </span>
+        ) : (
+          <span aria-hidden="true" className={`grid size-10 place-items-center rounded-full font-kit text-sm font-extrabold ${cor}`}>
+            {sigla}
+          </span>
+        )}
+        <p className="min-w-0 leading-tight">
+          <span className="flex items-center gap-1 font-semibold">
+            {perfil.arroba}
+            {post.perfil !== "mercadodabola" && (
+              <span aria-label="conta verificada" className="icone text-base text-[#4aa3ff]">verified</span>
+            )}
+          </span>
+          <span className="text-xs text-muted">{perfil.nome} · {dataBR(post.data)}</span>
         </p>
       </header>
-      <div className="px-5 pb-7 pt-6 sm:px-9">
-        <h2 className="font-kit text-5xl font-extrabold uppercase leading-[0.95] tracking-tight sm:text-7xl">{manchete}</h2>
-        {linha_fina && <p className="mt-4 text-lg leading-snug sm:text-xl">{linha_fina}</p>}
-        {principal && (
-          <section className="mt-7 border-t-4 border-pincel pt-4">
-            <h3 className="font-kit text-3xl font-bold uppercase leading-tight">{principal.titulo}</h3>
-            <p className="mt-2 text-lg leading-relaxed">{principal.texto}</p>
-          </section>
-        )}
-        {outras.length > 0 && (
-          <div className="mt-7 grid grid-cols-1 gap-x-8 gap-y-6 border-t-4 border-pincel pt-5 sm:grid-cols-2">
-            {outras.map((m) => (
-              <section key={m.titulo}>
-                <h3 className="font-kit text-2xl font-bold uppercase leading-tight">{m.titulo}</h3>
-                <p className="mt-1.5 leading-relaxed">{m.texto}</p>
-              </section>
-            ))}
-          </div>
-        )}
-        <p className="mt-8 border-t-2 border-dashed border-pincel/30 pt-3 text-xs text-pincel/70">
-          Escrito pela IA só com os números do save do PES de {dataBR(edicao.data_jogo)}. Nada de declarações ou bastidores
-          inventados.
-        </p>
-      </div>
+      <ArteDoPost post={post} />
+      <p className="px-4 py-3 text-sm leading-relaxed">
+        <span className="mr-1.5 font-semibold">{perfil.arroba}</span>
+        {post.legenda}
+      </p>
     </article>
   );
+}
+
+// Fundo e tipografia de cada perfil: o clube nas cores do uniforme; a TV em preto e vermelho; o portal em branco e
+// verde; o mercado em preto e dourado.
+const FUNDO = {
+  clube: "bg-pitch-950 text-chalk",
+  tntsportsbr: "bg-[#111] text-white",
+  geglobo: "bg-[#f4f4f1] text-[#14181a]",
+  mercadodabola: "bg-pitch-950 text-chalk",
+};
+
+function ArteDoPost({ post }) {
+  const d = post.dados;
+  const base = `relative flex aspect-square flex-col justify-between overflow-hidden p-6 ${FUNDO[post.perfil] ?? FUNDO.clube} ${
+    post.perfil === "clube" ? "arte-do-clube" : ""
+  }`;
+  const selo = (texto, extra = "") => (
+    <p className={`font-kit text-lg font-extrabold uppercase tracking-[0.15em] ${extra}`}>{texto}</p>
+  );
+  switch (post.tipo) {
+    case "fim_de_jogo":
+    case "goleada":
+    case "proximo_jogo":
+      return (
+        <div className={base}>
+          {post.perfil === "tntsportsbr" && <span aria-hidden="true" className="absolute inset-x-0 top-0 h-2 bg-[#d71920]" />}
+          {selo(post.tipo === "proximo_jogo" ? "Próximo jogo" : post.tipo === "goleada" ? "Que goleada" : "Fim de jogo",
+            post.perfil === "tntsportsbr" ? "text-[#ff4b55]" : "text-destaque")}
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-center">
+            {[d.mandante, d.visitante].map((t, i) => (
+              <div key={i} className={`flex flex-col items-center gap-2 ${i ? "order-3" : ""}`}>
+                <Escudo id={t.escudo} nome={t.nome} className="size-16 drop-shadow-lg sm:size-20" />
+                <span className="font-kit text-base font-bold uppercase leading-tight">{t.nome}</span>
+              </div>
+            ))}
+            <p className="order-2 font-kit text-6xl font-extrabold leading-none sm:text-7xl">
+              {post.tipo === "proximo_jogo" ? "×" : `${d.mandante.gols}-${d.visitante.gols}`}
+              {d.penaltis && <span className="block text-base font-semibold">pên. {d.penaltis[0]}-{d.penaltis[1]}</span>}
+            </p>
+          </div>
+          <div className="font-kit text-sm font-semibold uppercase tracking-wide opacity-85">
+            {d.gols_do_clube?.length > 0 && (
+              <p className="mb-1 flex flex-wrap items-center gap-x-2">
+                <span aria-hidden="true" className="icone text-base">sports_soccer</span>
+                {d.gols_do_clube.join(" · ")}
+              </p>
+            )}
+            <p>{d.competicao} · {dataBR(d.data)}</p>
+          </div>
+        </div>
+      );
+    case "classificacao":
+      return (
+        <div className={base}>
+          <span aria-hidden="true" className="absolute inset-x-0 top-0 h-2 bg-[#d71920]" />
+          <div>
+            {selo("Classificação", "text-[#ff4b55]")}
+            <p className="font-kit text-2xl font-bold uppercase">{d.competicao}</p>
+          </div>
+          <ol className="space-y-1.5">
+            {d.linhas.map((l) => (
+              <li key={l.nome} className={`grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded px-2 py-1 ${l.nosso ? "bg-white/15 font-bold" : ""}`}>
+                <span className="font-kit text-xl">{l.posicao}º</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <Escudo id={l.escudo} nome={l.nome} className="size-6" />
+                  <span className="truncate">{l.nome}</span>
+                </span>
+                <span className="font-kit text-xl">{l.pontos} pts</span>
+              </li>
+            ))}
+          </ol>
+          <p className="font-kit text-sm uppercase tracking-wide opacity-75">
+            {d.rodadas_jogadas} de {d.rodadas_total} rodadas
+          </p>
+        </div>
+      );
+    case "chegada":
+    case "saida":
+    case "fechado": {
+      const outro = d.veio_de ?? d.foi_para;
+      const chegou = post.tipo === "chegada" || d.movimento === "chegada";
+      const titulo = post.tipo === "fechado" ? "Tá fechado!" : chegou ? "Bem-vindo" : "Obrigado";
+      return (
+        <div className={base}>
+          {selo(titulo, post.tipo === "fechado" ? "text-gold text-3xl tracking-normal" : "text-destaque text-3xl tracking-normal")}
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Rosto id={d.player_id} className={`size-40 ring-4 ${post.tipo === "fechado" ? "ring-gold" : "ring-current"} ${!chegou && post.tipo === "saida" ? "grayscale" : ""}`} />
+            <p className="font-kit text-4xl font-extrabold uppercase leading-none">{d.nome}</p>
+          </div>
+          <div className="flex items-end justify-between gap-3 font-kit text-base font-semibold uppercase">
+            <span className="flex min-w-0 items-center gap-2">
+              {outro ? (
+                <>
+                  {chegou ? "de" : "para o"}
+                  <Escudo id={outro.escudo} nome={outro.nome} className="size-7" />
+                  <span className="truncate">{outro.nome}</span>
+                </>
+              ) : d.fim_de_contrato ? "fim de contrato" : chegou ? "sem clube" : ""}
+            </span>
+            {d.valor ? <Dinheiro valor={d.valor} className="text-3xl font-extrabold text-gold" /> : null}
+          </div>
+        </div>
+      );
+    }
+    case "proposta":
+      return (
+        <div className={base}>
+          <p className="self-start rounded-sm bg-[#06aa48] px-2 py-0.5 font-kit text-lg font-extrabold uppercase tracking-[0.15em] text-white">
+            Informação
+          </p>
+          <div className="flex items-center gap-4">
+            <Escudo id={d.clube.escudo} nome={d.clube.nome} className="size-20" />
+            <span aria-hidden="true" className="icone text-4xl text-[#06aa48]">arrow_forward</span>
+            <Rosto id={d.player_id} className="size-24" />
+          </div>
+          <div>
+            <p className="font-kit text-3xl font-extrabold uppercase leading-tight">
+              {d.clube.nome} faz proposta por {d.nome}
+            </p>
+            <p className="mt-2 font-kit text-xl">
+              <Dinheiro valor={d.valor} className="font-bold" />
+              {d.valor_de_mercado && <span className="opacity-70"> · valor de mercado <Dinheiro valor={d.valor_de_mercado} /></span>}
+            </p>
+          </div>
+        </div>
+      );
+    case "contratos":
+      return (
+        <div className={base}>
+          <p className="self-start rounded-sm bg-[#06aa48] px-2 py-0.5 font-kit text-lg font-extrabold uppercase tracking-[0.15em] text-white">
+            Contratos no fim
+          </p>
+          <ul className="space-y-2">
+            {d.jogadores.slice(0, 6).map((j) => (
+              <li key={j.player_id} className="flex items-center gap-3">
+                <Rosto id={j.player_id} className="size-10" />
+                <span className="min-w-0 flex-1 truncate font-semibold">{j.nome}</span>
+                <span className="font-kit text-lg">até {dataBR(j.fim)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="font-kit text-sm uppercase tracking-wide opacity-70">
+            {plural(d.jogadores.length, "contrato vence", "contratos vencem")} nos próximos 6 meses
+          </p>
+        </div>
+      );
+    default:
+      return (
+        <div className={base}>
+          {selo(post.tipo === "titulo" ? "Campeão!" : "Vice")}
+          <span aria-hidden="true" className="icone mx-auto text-gold" style={{ fontSize: "8rem" }}>emoji_events</span>
+          <p className="font-kit text-3xl font-extrabold uppercase leading-tight">{d.competicao} {d.temporada}</p>
+        </div>
+      );
+  }
 }
 
 const REAIS = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });

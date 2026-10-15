@@ -68,3 +68,21 @@ def test_sem_chave(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     with pytest.raises(ia.IAIndisponivel, match="VESTIARIO_GEMINI_KEY"):
         ia.chave()
+
+
+def test_demora_do_flash_cai_para_o_flash_lite(monkeypatch):
+    import io
+    import json as js
+    usados = []
+
+    def abrir(req, timeout):
+        usados.append(req.full_url.split("/models/")[1].split(":")[0])
+        if len(usados) == 1:
+            raise TimeoutError("The read operation timed out")
+        corpo = {"candidates": [{"content": {"parts": [{"text": js.dumps({"ok": True})}]}}]}
+        return io.BytesIO(js.dumps(corpo).encode())
+
+    monkeypatch.setenv("VESTIARIO_GEMINI_KEY", "teste")
+    monkeypatch.setattr(ia.urllib.request, "urlopen", abrir)
+    assert ia.responder("x", {}, {}) == {"ok": True}
+    assert usados == list(ia.MODELOS)

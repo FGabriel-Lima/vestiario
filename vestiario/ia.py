@@ -47,7 +47,13 @@ def responder(sistema: str, fatos: dict, esquema: dict) -> dict:
             if e.code in (429, 503):
                 raise IAIndisponivel("O Gemini está sobrecarregado agora. Tente de novo em alguns minutos.") from e
             raise IAIndisponivel(f"O Gemini recusou o pedido (erro {e.code}).") from e
-        except (urllib.error.URLError, TimeoutError) as e:
+        except TimeoutError as e:  # resposta longa demais (muitos posts) ou servidor lento: tenta o próximo modelo
+            if i + 1 < len(MODELOS):
+                continue
+            raise IAIndisponivel("O Gemini demorou demais para responder. Tente de novo em instantes.") from e
+        except urllib.error.URLError as e:
+            if isinstance(e.reason, TimeoutError) and i + 1 < len(MODELOS):
+                continue
             raise IAIndisponivel("Sem conexão com o Gemini. Confira a internet e tente de novo.") from e
     try:
         return json.loads(resposta["candidates"][0]["content"]["parts"][0]["text"])
