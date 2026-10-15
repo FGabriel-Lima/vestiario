@@ -118,7 +118,7 @@ export default function Carreira({ id, onVoltar }) {
 
   return (
     <div style={estiloDoClube(carreira.cores)} className="pb-24 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-12 lg:pb-0">
-      <aside className="lg:sticky lg:top-8 lg:self-start">
+      <aside className="lg:sticky lg:top-10 lg:-ml-2 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto lg:overscroll-contain lg:pl-2 lg:pr-2 lg:[scrollbar-width:thin]">
         <button onClick={onVoltar} className="mb-5 text-sm text-muted hover:text-chalk">
           <span className="icone">arrow_back</span> Carreiras
         </button>
