@@ -731,8 +731,8 @@ def _classificacao(partidas: list[dict]) -> list[dict]:
         for lado in ("mandante", "visitante"):
             linhas.setdefault(p[f"{lado}_idx"], {"idx": p[f"{lado}_idx"], "nome": p[lado], "escudo": p[f"{lado}_escudo"],
                                                  "jogos": 0, "vitorias": 0, "empates": 0, "derrotas": 0,
-                                                 "gols_pro": 0, "gols_contra": 0, "pontos": 0})
-    for p in partidas:
+                                                 "gols_pro": 0, "gols_contra": 0, "pontos": 0, "ultimos": []})
+    for p in sorted(partidas, key=lambda p: p["data"]):
         if p["disputada"]:
             for idx in (p["mandante_idx"], p["visitante_idx"]):
                 r = _campanha([p], idx)
@@ -740,6 +740,10 @@ def _classificacao(partidas: list[dict]) -> list[dict]:
                 for k in ("jogos", "vitorias", "empates", "derrotas", "gols_pro", "gols_contra"):
                     linha[k] += r[k]
                 linha["pontos"] += 3 * r["vitorias"] + r["empates"]
+                # forma: os 5 jogos mais recentes, o último à direita
+                linha["ultimos"] = (linha["ultimos"] + [{
+                    "r": "V" if r["vitorias"] else "E" if r["empates"] else "D",
+                    "jogo": f"{p['mandante']} {p['gols_mandante']}–{p['gols_visitante']} {p['visitante']}"}])[-5:]
     # critério da tela do PES (conferido no Brasileirão 2026): pontos, vitórias, saldo, gols pró e, entre os que
     # continuam empatados, pontos nos jogos entre eles; quem empata em tudo divide a posição e o PES lista pelo id
     # do time no jogo (o do escudo)
@@ -871,6 +875,14 @@ def _montar(e: dict, clube: int) -> dict:
     # a fase preliminar vem em chaves paralelas e não entra na chave do mata-mata
     mata_mata = [f for f in fases if f["tipo"] == "jogos" and f["titulo"] != "Fase preliminar"]
     chave = _chaveamento(mata_mata)
+    # quem passou da fase de grupos é quem aparece no mata-mata (vale mais que a posição: a tabela pode ter jogos
+    # que saíram do save, como no grupo B da Libertadores 2026, em que o 3º passou e o 2º não)
+    no_mata = {i for f in mata_mata for p in f["partidas"] for i in (p["mandante_idx"], p["visitante_idx"])}
+    for f in fases:
+        if f["tipo"] == "tabela" and f["grupos"][0]["titulo"] and no_mata:
+            for g in f["grupos"]:
+                for l in g["linhas"]:
+                    l["avancou"] = l["idx"] in no_mata
     return {"nome": e["nome"], "temporada": e["temporada"], "fases": fases, "chaveamento": chave,
             **_campeao(fases, chave, todas),
             "partidas_clube": [p for p in todas if clube in (p["mandante_idx"], p["visitante_idx"])]}

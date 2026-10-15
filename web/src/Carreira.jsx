@@ -130,7 +130,7 @@ export default function Carreira({ id, onVoltar }) {
             {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} />}
             {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
             {aba === "Feed" && <Feed id={id} />}
-            {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} />}
+            {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
             {aba === "Transferências" && <Transferencias id={id} />}
             {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
             {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
@@ -561,7 +561,7 @@ function Folha({ p }) {
   );
 }
 
-function Campeonatos({ id, clube }) {
+function Campeonatos({ id, clube, dataJogo }) {
   const { dados: edicoes, erro } = useDados(() => api.campeonatos(id), [id]);
   const [chave, setChave] = useState(null);
   if (erro) return <Erro mensagem={erro} />;
@@ -596,12 +596,12 @@ function Campeonatos({ id, clube }) {
           )}
         </select>
       </label>
-      <Edicao key={atual} id={id} chave={atual} clube={clube} />
+      <Edicao key={atual} id={id} chave={atual} clube={clube} dataJogo={dataJogo} />
     </>
   );
 }
 
-function Edicao({ id, chave, clube }) {
+function Edicao({ id, chave, clube, dataJogo }) {
   const { dados: e, erro } = useDados(() => api.campeonato(id, chave), [id, chave]);
   if (erro) return <Erro mensagem={erro} />;
   if (!e) return null;
@@ -635,12 +635,11 @@ function Edicao({ id, chave, clube }) {
             )}
             <div className={f.grupos.length > 1 ? "grid grid-cols-1 gap-x-8 gap-y-10 lg:grid-cols-2" : ""}>
               {f.grupos.map((g, k) => (
-                <Classificacao key={k} titulo={g.titulo} linhas={g.linhas} clube={clube} compacta={f.grupos.length > 1} />
+                <Classificacao key={k} titulo={g.titulo} linhas={g.linhas} clube={clube} compacta={f.grupos.length > 1}
+                  zona={zonaDaLinha(e.nome, f)} />
               ))}
             </div>
-            <p className="mt-3 text-xs text-muted">
-              Ordem: pontos, vitórias, saldo de gols, gols pró e confronto direto. Empatados em tudo dividem a posição.
-            </p>
+            <Legenda nome={e.nome} fase={f} />
           </section>
         ) : (
           <section key={i} className="mb-10">
@@ -653,7 +652,7 @@ function Edicao({ id, chave, clube }) {
         ),
       )}
 
-      {e.chaveamento.length > 0 && <Chaveamento id={id} colunas={e.chaveamento} clube={clube} />}
+      {e.chaveamento.length > 0 && <Chaveamento id={id} colunas={e.chaveamento} clube={clube} dataJogo={dataJogo} />}
 
       {temTabela && e.partidas_clube.length > 0 && (
         <section>
@@ -667,63 +666,159 @@ function Edicao({ id, chave, clube }) {
 
 // Assinatura do mata-mata: a chave riscada a giz. As linhas só aparecem quando os times da fase seguinte vêm mesmo
 // do par (o banco confere); com dado faltando ou trocado no save, os cards ficam soltos para não ligar times errados.
-function Chaveamento({ id, colunas, clube }) {
+// Como no ge e na UEFA, a chave começa nas oitavas; fases maiores ficam numa grade à parte. No desktop largo, as duas
+// metades se espelham e se encontram na final, no meio.
+const POR_TAMANHO = { 1: "Final", 2: "Semifinal", 4: "Quartas de final", 8: "Oitavas de final" };
+const dias = (a, b) => (new Date(a) - new Date(b)) / 864e5;
+// nos cards da chave falta largura: sai a sigla do clube, como nas artes de TV (CA Boca Juniors → Boca Juniors)
+const curto = (nome) => nome?.replace(/^(CA|CD|CR|SE|SC|EC|FC|AA|Club)\s+|\s+(FC|EC|SC|AC)$/g, "") ?? nome;
+
+function Chaveamento({ id, colunas, clube, dataJogo }) {
   const [aberta, setAberta] = useState(null);
-  const liga = (i) => colunas[i].encaixa;
+  let inicio = colunas.length;
+  while (inicio > 0 && colunas[inicio - 1].confrontos.length <= 8) inicio--;
+  const anteriores = colunas.slice(0, inicio);
+  const chave = colunas.slice(inicio);
+
+  // copa em andamento (jogo há até 60 dias da data do save): as fases que faltam até a final entram como vagas
+  const ultima = chave.at(-1);
+  const n = ultima?.confrontos.length ?? 0;
+  const ultimoJogo = chave.flatMap((c) => c.confrontos.flatMap((x) => x.jogos.map((j) => j.data))).sort().at(-1);
+  if (ultima && ultima.titulo !== "Final" && n > 1 && (n & (n - 1)) === 0 && dias(dataJogo, ultimoJogo) <= 60) {
+    chave[chave.length - 1] = { ...ultima, encaixa: true };
+    for (let k = n / 2; k >= 1; k /= 2) chave.push({ titulo: POR_TAMANHO[k], confrontos: Array(k).fill(null), encaixa: k > 1 });
+  }
+  const espelha = chave.length > 1 && chave.at(-1).confrontos.length === 1 &&
+    chave.slice(0, -1).every((c, i) => c.encaixa && c.confrontos.length === 2 * chave[i + 1].confrontos.length);
+  const final = chave.at(-1);
+  const lados = chave.slice(0, -1);
+  const metade = (col, lado) => {
+    const m = col.confrontos.length / 2;
+    return { ...col, confrontos: lado ? col.confrontos.slice(m) : col.confrontos.slice(0, m) };
+  };
+  const props = { clube, onAbrir: setAberta };
+  // fase com times leva mais largura que fase só com vagas "A definir"
+  const trilhas = lados.map((c) => (c.confrontos.some(Boolean) ? "minmax(0, 1.4fr)" : "minmax(0, 1fr)"));
+
   return (
     <section className="mb-12" aria-label="Chaveamento">
       <h3 className="mb-4 font-kit text-2xl font-semibold uppercase">Mata-mata</h3>
-      <div className="relative -mx-4 overflow-x-auto px-4 pb-4 sm:mx-0 sm:px-0">
-        {/* colunas flexíveis: no desktop a chave inteira cabe; só rola de lado quando falta espaço */}
-        <div className="grid auto-cols-[minmax(11rem,1fr)] grid-flow-col gap-8" style={{ maxWidth: `${colunas.length * 18}rem` }}>
-          {colunas.map((col, i) => {
-            const pares = liga(i)
-              ? col.confrontos.filter((_, k) => k % 2 === 0).map((c, k) => [c, col.confrontos[2 * k + 1]])
-              : col.confrontos.map((c) => [c]);
-            const recebe = i > 0 && liga(i - 1);
-            return (
-              <div key={col.titulo} className="flex min-w-0 flex-col">
-                <h4 className="mb-3 font-kit text-lg font-semibold uppercase text-muted">
-                  {col.titulo} <span className="font-normal">· {col.confrontos.length}</span>
-                </h4>
-                <div className="flex flex-1 flex-col justify-around gap-4">
-                  {pares.map((par, k) => (
-                    <div key={k} className={`flex flex-1 flex-col justify-around gap-4 ${par.length === 2 ? "chave-par" : ""}`}>
-                      {par.map((c, j) => (
-                        <Confronto key={j} c={c} clube={clube} recebe={recebe} onAbrir={setAberta} />
-                      ))}
-                    </div>
-                  ))}
+      {chave.length > 0 && (
+        <>
+          {espelha && (
+            <div
+              className="chave chave-espelhada mb-4 hidden xl:grid"
+              style={{ gridTemplateColumns: [...trilhas, "minmax(0, 1.1fr)", ...trilhas.toReversed()].join(" ") }}
+            >
+              {lados.map((col, i) => (
+                <Coluna key={`e${i}`} col={metade(col, 0)} liga recebe={i > 0} compacto {...props} />
+              ))}
+              <div className="flex min-w-0 flex-col">
+                <h4 className="mb-3 text-center font-kit text-lg font-semibold uppercase text-gold">{final.titulo}</h4>
+                <div className="flex flex-1 flex-col justify-center">
+                  <div className="relative">
+                    <span aria-hidden="true" className="icone taca absolute bottom-full left-1/2 mb-2 -translate-x-1/2 text-gold" style={{ fontSize: "3.5rem" }}>emoji_events</span>
+                    <Confronto c={final.confrontos[0]} final compacto {...props} />
+                  </div>
                 </div>
               </div>
-            );
-          })}
+              {lados.map((col, i) => (
+                <Coluna key={`d${i}`} col={metade(col, 1)} liga recebe={i > 0} compacto espelho {...props} />
+              )).reverse()}
+            </div>
+          )}
+          <div className={`relative -mx-4 overflow-x-auto px-4 pb-4 sm:mx-0 sm:px-0 ${espelha ? "xl:hidden" : ""}`}>
+            {/* colunas flexíveis: no desktop a chave inteira cabe; só rola de lado quando falta espaço */}
+            <div className="chave grid auto-cols-[minmax(11rem,1fr)] grid-flow-col" style={{ maxWidth: `${chave.length * 18}rem` }}>
+              {chave.map((col, i) => (
+                <Coluna key={i} col={col} liga={col.encaixa} recebe={i > 0 && chave[i - 1].encaixa} compacto {...props} />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      {anteriores.map((col, i) => (
+        <div key={i} className="mt-8">
+          <h4 className="mb-3 font-kit text-lg font-semibold uppercase text-muted">
+            {col.titulo} <span className="font-normal">· {plural(col.confrontos.length, "confronto", "confrontos")}</span>
+          </h4>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {col.confrontos.map((c, k) => (
+              <Confronto key={k} c={c} {...props} />
+            ))}
+          </div>
         </div>
-      </div>
+      ))}
       {aberta !== null && <Sumula id={id} pid={aberta} onFechar={() => setAberta(null)} />}
     </section>
   );
 }
 
-function Confronto({ c, clube, recebe, onAbrir }) {
-  const decidido = c.times.some((t) => t.vencedor);
+// Uma fase da chave. Com `liga`, os confrontos vão em pares com o colchete de giz até a fase seguinte (um confronto
+// sozinho, como a semifinal de cada lado, sai num traço reto); `espelho` vira os traços para a esquerda.
+function Coluna({ col, liga, recebe, espelho, compacto, clube, onAbrir }) {
+  const pares = liga && col.confrontos.length > 1
+    ? col.confrontos.filter((_, k) => k % 2 === 0).map((c, k) => [c, col.confrontos[2 * k + 1]])
+    : col.confrontos.map((c) => [c]);
+  const sozinho = liga && col.confrontos.length === 1;
   return (
-    <div className={`rounded-md bg-pitch-900 ${recebe ? "chave-entrada" : ""}`}>
-      <ul className="px-3 pt-2.5">
+    <div className={`flex min-w-0 flex-col ${espelho ? "espelho" : ""}`}>
+      <h4 className={`mb-3 font-kit text-lg font-semibold uppercase text-muted ${espelho ? "text-right" : ""}`}>
+        {col.titulo}
+      </h4>
+      <div className="flex flex-1 flex-col justify-around gap-4">
+        {pares.map((par, k) => (
+          <div key={k} className={`flex flex-1 flex-col justify-around gap-4 ${par.length === 2 ? "chave-par" : ""}`}>
+            {par.map((c, j) => (
+              <Confronto key={j} c={c} recebe={recebe} sai={sozinho} compacto={compacto} clube={clube} onAbrir={onAbrir} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Confronto({ c, clube, recebe, sai, final, compacto, onAbrir }) {
+  const ligacoes = `${recebe ? "chave-entrada" : ""} ${sai ? "chave-saida" : ""} ${final ? "chave-final" : ""}`;
+  if (!c) {
+    // vaga de uma fase que ainda não tem jogo marcado no save
+    return (
+      <div className={`relative rounded-md border border-dashed border-pitch-700 ${ligacoes}`}>
+        <ul className="px-3 pt-2.5 text-sm text-muted/70">
+          {[0, 1].map((k) => (
+            <li key={k} className="flex items-center gap-2 py-0.5">
+              <span className="size-5 shrink-0 rounded-full border border-dashed border-giz" />A definir
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1.5 border-t border-dashed border-pitch-700 px-4 py-1.5 font-kit text-sm uppercase tracking-wide text-muted/60">
+          {final ? "Final" : "Sem data"}
+        </p>
+      </div>
+    );
+  }
+  const decidido = c.times.some((t) => t.vencedor);
+  const nosso = c.times.some((t) => t.idx === clube);
+  return (
+    <div className={`relative rounded-md bg-pitch-900 ${nosso ? "ring-1 ring-destaque/70" : ""} ${final ? "ring-1 ring-gold/70" : ""} ${ligacoes}`}>
+      <ul className={`px-3 pt-2.5 ${compacto ? "text-sm" : ""}`}>
         {c.times.map((t) => (
           <li
             key={t.idx}
             className={`flex items-center gap-2 py-0.5 ${decidido && !t.vencedor ? "text-muted" : ""} ${t.vencedor ? "font-semibold" : ""}`}
           >
             <Escudo id={t.escudo} nome={t.nome ?? "?"} className={`size-5 ${decidido && !t.vencedor ? "opacity-50" : ""}`} />
-            <span className={`min-w-0 flex-1 truncate ${t.idx === clube ? "text-destaque" : ""}`}>{t.nome}</span>
+            <span title={t.nome} className={`min-w-0 flex-1 truncate ${t.idx === clube ? "text-destaque" : ""}`}>
+              {compacto ? curto(t.nome) : t.nome}
+            </span>
             {t.vencedor && <span className="sr-only">(passou)</span>}
-            <span className="font-kit text-xl font-bold">{t.gols ?? "–"}</span>
+            <span className={`font-kit text-xl font-bold ${t.vencedor && final ? "text-gold" : ""}`}>{t.gols ?? "–"}</span>
             {t.penaltis !== null && <span className="w-6 font-kit text-sm text-muted">({t.penaltis})</span>}
           </li>
         ))}
       </ul>
-      <div className="mt-1.5 flex gap-1 border-t border-pitch-800 px-2 py-1.5">
+      <div className="mt-1.5 flex flex-wrap gap-x-1 border-t border-pitch-800 px-2 py-1.5">
         {c.jogos.map((j, k) => {
           const rotulo = c.jogos.length === 1 ? "Jogo único" : k === 0 ? "Ida" : "Volta";
           return j.disputada ? (
@@ -731,12 +826,12 @@ function Confronto({ c, clube, recebe, onAbrir }) {
               key={j.id}
               onClick={() => onAbrir(j.id)}
               aria-haspopup="dialog"
-              className="rounded-sm px-2 py-0.5 font-kit text-sm uppercase tracking-wide text-muted hover:bg-pitch-800 hover:text-chalk"
+              className="rounded-sm px-1.5 py-0.5 font-kit text-sm uppercase tracking-wide text-muted hover:bg-pitch-800 hover:text-chalk"
             >
               {rotulo} {j.placar.replace("-", "–")}
             </button>
           ) : (
-            <span key={j.id} className="px-2 py-0.5 font-kit text-sm uppercase tracking-wide text-muted/70">
+            <span key={j.id} className="px-1.5 py-0.5 font-kit text-sm uppercase tracking-wide text-muted/70">
               {rotulo} {dataBR(j.data).slice(0, 5)}
             </span>
           );
@@ -746,10 +841,76 @@ function Confronto({ c, clube, recebe, onAbrir }) {
   );
 }
 
+// Zonas da tabela, como no ge e na Premier League: a posição ganha a cor da vaga ou da queda. O save não diz quantas
+// vagas o PES dá, então ligas seguem a regra da competição real (o Brasileirão foi conferido num save: 4 caem da
+// Série A e 4 sobem da B). Na fase de grupos, quem passou sai do próprio mata-mata quando ele já está no banco.
+const ZONAS = {
+  avanca: ["Mata-mata", "#4d9fff"],
+  lib: ["Libertadores", "#4d9fff"],
+  pre: ["Pré-Libertadores", "#9cc9ff"],
+  sula: ["Sul-Americana", "#3fcf8e"],
+  ucl: ["Champions League", "#4d9fff"],
+  uel: ["Europa League", "#f39c3d"],
+  uecl: ["Conference League", "#3fcf8e"],
+  acesso: ["Acesso", "#3fcf8e"],
+  queda: ["Rebaixamento", "var(--color-cartao)"],
+};
+const EUROPA = [[1, 4, "ucl"], [5, 5, "uel"], [6, 6, "uecl"]];
+const ZONAS_DA_LIGA = {
+  "Brasileirão Série A": [[1, 4, "lib"], [5, 6, "pre"], [7, 12, "sula"], [17, 20, "queda"]],
+  "Brasileirão Série B": [[1, 4, "acesso"], [17, 20, "queda"]],
+  "Premier League": [...EUROPA, [18, 20, "queda"]],
+  LaLiga: [...EUROPA, [18, 20, "queda"]],
+  "Serie A TIM": [...EUROPA, [18, 20, "queda"]],
+  "Ligue 1": [...EUROPA, [17, 18, "queda"]],
+  Bundesliga: EUROPA, // sem 2ª divisão no patch: ninguém cai
+};
+const ZONAS_DO_GRUPO = {
+  "Copa Libertadores": [[1, 2, "avanca"], [3, 3, "sula"]],
+  "UEFA Champions League": [[1, 2, "avanca"], [3, 3, "uel"]],
+};
+
+function zonaDaLinha(nome, fase) {
+  const regras = fase.grupos[0].titulo ? ZONAS_DO_GRUPO[nome] ?? [[1, 2, "avanca"]] : ZONAS_DA_LIGA[nome] ?? [];
+  return (l) => {
+    const pos = regras.find(([de, ate]) => l.posicao >= de && l.posicao <= ate)?.[2] ?? null;
+    if (l.avancou === undefined) return pos;
+    return l.avancou ? "avanca" : pos === "avanca" ? null : pos;
+  };
+}
+
+function Legenda({ nome, fase }) {
+  const zona = zonaDaLinha(nome, fase);
+  const presentes = new Set(fase.grupos.flatMap((g) => g.linhas.map(zona)));
+  const itens = Object.keys(ZONAS).filter((k) => presentes.has(k));
+  const real = !fase.grupos[0].titulo && itens.length > 0;
+  return (
+    <div className="mt-4 space-y-2 text-xs text-muted">
+      {itens.length > 0 && (
+        <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-chalk">
+          {itens.map((k) => (
+            <li key={k} className="flex items-center gap-2">
+              <span aria-hidden="true" className="h-3 w-3 rounded-sm" style={{ background: ZONAS[k][1] }} />
+              {ZONAS[k][0]}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p>
+        Ordem: pontos, vitórias, saldo de gols, gols pró e confronto direto. Empatados em tudo dividem a posição.
+        {real && " Vagas e quedas pela regra da competição real; o PES pode distribuir diferente."}
+        {fase.grupos.some((g) => g.linhas.some((l) => l.avancou !== undefined)) && " Mata-mata: quem está na chave."}
+      </p>
+    </div>
+  );
+}
+
 // Colunas que somem no celular (e nas tabelas de grupo, que dividem a largura)
 const DETALHE = "hidden sm:table-cell";
+const FORMA = { V: "bg-neon", E: "bg-muted", D: "bg-cartao" };
+const RESULTADO = { V: "vitória", E: "empate", D: "derrota" };
 
-function Classificacao({ titulo, linhas, clube, compacta }) {
+function Classificacao({ titulo, linhas, clube, compacta, zona }) {
   const detalhe = compacta ? "hidden" : DETALHE;
   const colunas = [
     ["J", "Jogos", ""],
@@ -765,7 +926,7 @@ function Classificacao({ titulo, linhas, clube, compacta }) {
       {titulo && <caption className="mb-2 text-left font-kit text-xl font-semibold uppercase text-muted">{titulo}</caption>}
       <thead>
         <tr className="border-b border-pitch-700 font-kit text-base uppercase tracking-wide text-muted">
-          <th className="w-8 py-2 text-right font-semibold">
+          <th className="w-10 py-2 text-center font-semibold">
             <abbr title="Posição" className="no-underline">#</abbr>
           </th>
           <th className="py-2 pl-3 font-semibold">Time</th>
@@ -777,15 +938,31 @@ function Classificacao({ titulo, linhas, clube, compacta }) {
               <abbr title={nome} className="no-underline">{sigla}</abbr>
             </th>
           ))}
+          <th className={`w-36 pl-6 text-left font-semibold ${detalhe}`}>Últimos 5</th>
         </tr>
       </thead>
       <tbody>
-        {linhas.map((l) => {
+        {linhas.map((l, i) => {
           const nosso = l.idx === clube;
           const saldo = l.gols_pro - l.gols_contra;
+          const z = zona(l);
+          // linha de corte a giz onde muda a zona, como o técnico risca no quadro
+          const corte = i > 0 && z !== zona(linhas[i - 1]);
           return (
-            <tr key={l.idx} aria-current={nosso ? "true" : undefined} className={`border-b border-pitch-800 ${nosso ? "linha-do-clube" : ""}`}>
-              <td className="py-2 text-right font-kit text-lg text-muted">{l.posicao}</td>
+            <tr
+              key={l.idx}
+              aria-current={nosso ? "true" : undefined}
+              className={`border-b border-pitch-800 ${nosso ? "linha-do-clube" : ""} ${corte ? "corte" : ""}`}
+            >
+              <td className="py-2 text-center">
+                <span
+                  className={`inline-grid size-7 place-items-center rounded-sm font-kit text-lg leading-none ${z ? "font-bold text-pitch-950" : "text-muted"}`}
+                  style={z ? { background: ZONAS[z][1] } : undefined}
+                >
+                  {l.posicao}
+                </span>
+                {z && <span className="sr-only">({ZONAS[z][0]})</span>}
+              </td>
               <td className="py-2 pl-3">
                 <span className="flex min-w-0 items-center gap-2">
                   <Escudo id={l.escudo} nome={l.nome ?? "?"} />
@@ -798,8 +975,20 @@ function Classificacao({ titulo, linhas, clube, compacta }) {
                   {v}
                 </td>
               ))}
-              <td className={`text-right font-kit text-lg ${saldo > 0 ? "text-neon" : saldo < 0 ? "text-cartao" : "text-muted"}`}>
-                {saldo > 0 ? `+${saldo}` : saldo}
+              <td className={`text-right font-kit text-lg ${saldo === 0 ? "text-muted" : ""}`}>{saldo > 0 ? `+${saldo}` : saldo}</td>
+              <td className={`pl-6 ${detalhe}`}>
+                <span className="flex gap-1">
+                  {l.ultimos.map((u, k) => (
+                    <span
+                      key={k}
+                      title={u.jogo}
+                      aria-label={`${RESULTADO[u.r]}: ${u.jogo}`}
+                      className={`grid size-5 place-items-center rounded-sm font-kit text-xs font-bold text-pitch-950 ${FORMA[u.r]}`}
+                    >
+                      {u.r}
+                    </span>
+                  ))}
+                </span>
               </td>
             </tr>
           );

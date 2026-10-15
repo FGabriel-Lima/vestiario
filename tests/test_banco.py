@@ -453,6 +453,8 @@ def test_classificacao_usa_confronto_direto_e_divide_a_posicao():
     linhas = banco._classificacao(jogos)
     assert [(l["nome"], l["posicao"]) for l in linhas] == [
         ("Time D", 1), ("Time G", 1), ("Time A", 3), ("Time B", 4), ("Time C", 4), ("Time E", 6), ("Time F", 7)]
+    a = next(l for l in linhas if l["nome"] == "Time A")
+    assert a["ultimos"] == [{"r": "V", "jogo": "Time A 2–0 Time B"}, {"r": "D", "jogo": "Time D 3–0 Time A"}]
 
 
 
@@ -479,6 +481,8 @@ def test_fases_da_mesma_competicao_em_anos_seguidos_sao_uma_edicao(con):
         ("UEFA Champions League", "2026"), ("UEFA Champions League", "2025/26")]
     fases = banco.edicao(con, 1, "UEFA Champions League|2025/26")["fases"]
     assert [f["titulo"] for f in fases] == ["Fase de grupos", "1ª fase"]
+    # passou do grupo quem jogou o mata-mata
+    assert {l["nome"]: l["avancou"] for l in fases[0]["grupos"][0]["linhas"]} == {"Clube A": True, "Clube B": False}
 
 
 def test_titulos(con):

@@ -154,7 +154,22 @@ body {
     no-repeat left / 5px 100%;
 }
 
-/* Chave do mata-mata riscada a giz: o colchete liga os dois confrontos do par ao da fase seguinte */
+/* Classificação: onde muda a zona, a linha de corte riscada a giz */
+.corte > td {
+  border-top: 2px dashed var(--color-giz);
+}
+
+/* Chave do mata-mata riscada a giz: o colchete liga os dois confrontos do par ao da fase seguinte.
+   Cada traço ocupa metade do vão entre as colunas; .espelho vira tudo para a esquerda (lado direito da chave) */
+.chave {
+  --vao: 2rem;
+  column-gap: var(--vao);
+}
+/* a chave espelhada sai da coluna da página e usa a largura da tela (até 96rem) */
+.chave-espelhada {
+  --vao: 1.5rem;
+  margin-inline: calc(50% - min(50vw - 2rem, 48rem));
+}
 .chave-par {
   position: relative;
 }
@@ -163,22 +178,44 @@ body {
   position: absolute;
   top: 25%;
   bottom: 25%;
-  right: -1rem;
-  width: 1rem;
+  right: calc(var(--vao) / -2);
+  width: calc(var(--vao) / 2);
   border: 2px solid var(--color-giz);
   border-left: 0;
   border-radius: 0 3px 3px 0;
 }
-.chave-entrada {
-  position: relative;
-}
-.chave-entrada::before {
+.chave-entrada::before,
+.chave-final::before,
+.chave-saida::after,
+.chave-final::after {
   content: "";
   position: absolute;
   top: 50%;
-  left: -1rem;
-  width: 1rem;
+  width: calc(var(--vao) / 2);
   border-top: 2px solid var(--color-giz);
+}
+.chave-entrada::before,
+.chave-final::before {
+  left: calc(var(--vao) / -2);
+}
+.chave-saida::after,
+.chave-final::after {
+  right: calc(var(--vao) / -2);
+}
+.espelho .chave-par::after {
+  right: auto;
+  left: calc(var(--vao) / -2);
+  border-left: 2px solid var(--color-giz);
+  border-right: 0;
+  border-radius: 3px 0 0 3px;
+}
+.espelho .chave-entrada::before {
+  left: auto;
+  right: calc(var(--vao) / -2);
+}
+.espelho .chave-saida::after {
+  right: auto;
+  left: calc(var(--vao) / -2);
 }
 
 /* Sala de troféus: a prateleira de madeira escura do vestiário; vazia, fica só o traço de giz */
