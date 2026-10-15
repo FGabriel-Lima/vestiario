@@ -665,6 +665,50 @@ def promessas(con: sqlite3.Connection, cid: int, pid: int, limite: int = 3) -> l
     return lista
 
 
+def ficha(con: sqlite3.Connection, cid: int, pid: int) -> dict | None:
+    """Tudo sobre um jogador no clube: números por temporada, jogo a jogo, valor de mercado em cada data,
+    contrato, propostas e promessas. None se ele nunca passou pelo clube (nem no elenco, nem numa escalação)."""
+    s = _ultima(con, cid)
+    clube = s["clube_idx"]
+    jogos = []
+    for r in con.execute(
+            "SELECT p.id, e.minutos, e.nota, e.gols, e.assistencias FROM escalacao e JOIN partida p ON p.id = e.partida_id "
+            "WHERE p.carreira_id = ? AND e.player_id = ? AND e.lado = CASE ? WHEN p.mandante_idx THEN 0 "
+            "WHEN p.visitante_idx THEN 1 END ORDER BY p.data DESC", (cid, pid, clube)):
+        p = dict(con.execute(_PARTIDA + "WHERE p.id = ?", (r["id"],)).fetchone())
+        casa = p["mandante_idx"] == clube
+        jogos.append({"partida_id": p["id"], "data": p["data"], "competicao": p["competicao"], "em_casa": casa,
+                      "adversario": {"nome": p["visitante" if casa else "mandante"],
+                                     "escudo": p["visitante_escudo" if casa else "mandante_escudo"]},
+                      "placar": list(_placar(p, clube)), "minutos": r["minutos"],
+                      "nota": r["nota"] / 10 if r["nota"] is not None else None,
+                      "gols": r["gols"], "assistencias": r["assistencias"]})
+    valores = [{"data": d, "valor": v * MOEDA} for d, v, _ in con.execute(
+        "SELECT s.data_jogo, e.valor, max(s.id) FROM elenco e JOIN sincronizacao s ON s.id = e.sincronizacao_id "
+        "WHERE s.carreira_id = ? AND s.clube_idx = ? AND e.player_id = ? GROUP BY s.data_jogo ORDER BY s.data_jogo",
+        (cid, clube, pid)) if v]
+    atual = con.execute("SELECT idade, valor FROM elenco WHERE sincronizacao_id = ? AND player_id = ?",
+                        (s["id"], pid)).fetchone()
+    passou = con.execute("SELECT 1 FROM elenco e JOIN sincronizacao s ON s.id = e.sincronizacao_id "
+                         "WHERE s.carreira_id = ? AND s.clube_idx = ? AND e.player_id = ? LIMIT 1", (cid, clube, pid)).fetchone()
+    if not jogos and passou is None:
+        return None
+    jog = con.execute("SELECT nome, posicao FROM jogador WHERE player_id = ?", (pid,)).fetchone()
+
+    def somar(lista):
+        notas = [j["nota"] for j in lista if j["nota"] is not None]
+        return {"jogos": len(lista), "gols": sum(j["gols"] for j in lista),
+                "assistencias": sum(j["assistencias"] for j in lista), "minutos": sum(j["minutos"] for j in lista),
+                "nota": round(sum(notas) / len(notas), 1) if notas else None}
+
+    return {"player_id": pid, "nome": jog["nome"] if jog else f"Jogador #{pid}", "posicao": jog["posicao"] if jog else None,
+            "idade": atual["idade"] if atual else None, "valor": atual["valor"] * MOEDA if atual and atual["valor"] else None,
+            "no_elenco": atual is not None, "contrato": _contratos(con, s["id"]).get(pid), "total": somar(jogos),
+            "temporadas": [{"ano": int(a), **somar(list(g))} for a, g in groupby(jogos, key=lambda j: j["data"][:4])],
+            "jogos": jogos, "valores": valores, "propostas": [x for x in propostas(con, cid) if x["player_id"] == pid],
+            "promessas": promessas(con, cid, pid)}
+
+
 def _ordem_de_setor(posicao: int | None) -> int:
     """Goleiros, defensores, meio-campistas e atacantes (códigos de POSICOES)."""
     return 9 if posicao is None else 0 if posicao == 0 else 1 if posicao <= 3 else 2 if posicao <= 8 else 3

@@ -264,6 +264,38 @@ body {
     var(--time-2, var(--color-pitch-700)) 4.5rem 5.5rem);
 }
 
+/* Ficha do jogador: gaveta que entra pela direita, por cima da tela (tela cheia no celular) */
+.gaveta {
+  margin: 0 0 0 auto;
+  width: min(44rem, 100vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--color-pitch-700);
+  background: var(--color-pitch-950);
+  color: var(--color-chalk);
+  box-shadow: -24px 0 48px rgb(0 0 0 / 0.55);
+}
+.gaveta::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+.gaveta[open] {
+  animation: gaveta 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes gaveta {
+  from {
+    transform: translateX(3rem);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gaveta[open] {
+    animation: none;
+  }
+}
+
 /* Conversas: a resposta do contato chega como bilhete de papel (a mesma folha do parecer do auxiliar) */
 .balao-papel {
   padding: 0.65rem 1rem;

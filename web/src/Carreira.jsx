@@ -72,7 +72,9 @@ export default function Carreira({ id, onVoltar }) {
   const [ano, setAno] = useState(null);
   const [aba, setAba] = useState(ABAS[0]);
   const [contato, setContato] = useState(null);
+  const [ficha, setFicha] = useState(null);
   const conversar = (c) => {
+    setFicha(null);
     setContato(c);
     setAba("Conversas");
   };
@@ -197,12 +199,15 @@ export default function Carreira({ id, onVoltar }) {
           ) : (
             <>
               {aba === "Visão geral" && (
-                <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
+                <>
+                  <Atencao id={id} onFicha={setFicha} onConversar={conversar} onAba={setAba} />
+                  <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
+                </>
               )}
-              {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} />}
+              {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} onFicha={setFicha} />}
               {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
               {aba === "Feed" && <Feed id={id} />}
-              {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} />}
+              {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} onFicha={setFicha} />}
               {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
               {aba === "Transferências" && <Transferencias id={id} />}
               {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
@@ -212,6 +217,10 @@ export default function Carreira({ id, onVoltar }) {
           )}
         </div>
       </div>
+
+      {ficha !== null && (
+        <Ficha key={ficha} id={id} pid={ficha} clube={carreira.clube_nome} onFechar={() => setFicha(null)} onConversar={conversar} />
+      )}
 
       {/* celular: os quatro grupos numa barra embaixo, ao alcance do polegar; as abas do grupo ficam no topo */}
       <nav
@@ -420,7 +429,7 @@ const CURTOS = { jogos: "J", gols: "G", assistencias: "A" };
 
 const comparar = (x, y) => (typeof x === "string" ? x.localeCompare(y, "pt-BR") : x - y);
 
-function Elenco({ id, ano, dataJogo, onConversar }) {
+function Elenco({ id, ano, dataJogo, onConversar, onFicha }) {
   const { dados: linhas, erro } = useDados(() => api.elenco(id, ano), [id, ano]);
   const [ordem, setOrdem] = useState("jogos");
   if (erro) return <Erro mensagem={erro} />;
@@ -473,7 +482,9 @@ function Elenco({ id, ano, dataJogo, onConversar }) {
                   <Rosto id={l.player_id} className={`size-9 ${l.no_elenco ? "" : "opacity-60 grayscale"}`} />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2">
-                      {l.nome}
+                      <button onClick={() => onFicha(l.player_id)} className="text-left hover:text-destaque hover:underline">
+                        {l.nome}
+                      </button>
                       {!l.no_elenco && <span className="font-kit text-sm uppercase tracking-wide">saiu</span>}
                       {l.no_elenco && (
                         <button
@@ -1581,7 +1592,7 @@ const corDoSinal = (s) => SINAL_COR[s] ?? (s.startsWith("proposta") ? "bg-[#4aa3
 // os sinais que puxam assunto vêm primeiro na agenda
 const PESO = (s) => (s.startsWith("proposta") ? 0 : s === "contrato vencendo" ? 1 : s === "joga pouco" ? 2 : s === "fase ruim" ? 3 : 5);
 
-function Conversas({ id, contato, onContato }) {
+function Conversas({ id, contato, onContato, onFicha }) {
   const [versao, setVersao] = useState(0);
   const { dados: lista, erro } = useDados(() => api.contatos(id), [id, versao]);
   if (erro) return <Erro mensagem={erro} />;
@@ -1610,7 +1621,8 @@ function Conversas({ id, contato, onContato }) {
       </nav>
       <div className={`min-h-[36rem] bg-pitch-950 ${contato ? "" : "hidden lg:grid lg:place-items-center"}`}>
         {contato ? (
-          <Conversa key={contato} id={id} contato={contato} onVoltar={() => onContato(null)} onMudou={() => setVersao((v) => v + 1)} />
+          <Conversa key={contato} id={id} contato={contato} onVoltar={() => onContato(null)} onMudou={() => setVersao((v) => v + 1)}
+            onFicha={onFicha} />
         ) : (
           <p className="max-w-xs text-center text-muted">
             Escolha um contato. O auxiliar conhece o elenco inteiro; cada atleta fala do próprio momento.
@@ -1661,7 +1673,7 @@ function Contato({ c, ativo, onClick, fixado = false }) {
   );
 }
 
-function Conversa({ id, contato, onVoltar, onMudou }) {
+function Conversa({ id, contato, onVoltar, onMudou, onFicha }) {
   const { dados: c, erro } = useDados(() => api.conversa(id, contato), [id, contato]);
   const [mensagens, setMensagens] = useState(null);
   const [texto, setTexto] = useState("");
@@ -1724,6 +1736,15 @@ function Conversa({ id, contato, onVoltar, onMudou }) {
           </p>
           <p className="truncate font-kit text-sm uppercase tracking-wide text-muted">{numeros.filter(Boolean).join(" · ")}</p>
         </div>
+        {!auxiliar && (
+          <button
+            onClick={() => onFicha(Number(contato))}
+            className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-pitch-700 px-3 py-1 text-sm text-muted hover:border-destaque hover:text-destaque"
+          >
+            <span aria-hidden="true" className="icone text-base">badge</span>
+            <span className="hidden sm:inline">Ver</span> ficha
+          </button>
+        )}
       </header>
       {c.fatos.promessas_do_professor?.length > 0 && (
         <ul aria-label="Promessas feitas" className="space-y-1 border-b border-pitch-800 bg-pitch-950/60 px-4 py-2 text-sm">
@@ -1812,6 +1833,314 @@ function Conversa({ id, contato, onVoltar, onMudou }) {
           </button>
         </form>
       </div>
+    </section>
+  );
+}
+
+// Quadro do topo da visão geral: o que pede uma decisão agora. O código escolhe; cada linha leva a quem resolve.
+function Atencao({ id, onFicha, onConversar, onAba }) {
+  const { dados: a } = useDados(() => api.atencao(id), [id]);
+  if (!a) return null;
+  const linhas = [
+    ...a.propostas.map((p) => ({
+      chave: `p${p.player_id}-${p.clube.nome}`,
+      icone: "mail",
+      cor: "text-[#7cc0ff]",
+      rosto: p.player_id,
+      texto: (
+        <>
+          <b>{p.clube.nome}</b> quer <b>{p.nome}</b> por <Dinheiro valor={p.valor} className="font-kit text-lg font-bold" />
+          {p.valor_mercado && <span className="text-muted"> · vale <Dinheiro valor={p.valor_mercado} /></span>}
+        </>
+      ),
+      acao: ["Ver proposta", () => onAba("Transferências")],
+    })),
+    ...a.contratos.map((c) => ({
+      chave: `c${c.player_id}`,
+      icone: "hourglass_bottom",
+      cor: "text-gold",
+      rosto: c.player_id,
+      texto: (
+        <>
+          <b>{c.nome}</b>: {c.emprestimo ? "o empréstimo acaba" : "o contrato vence"} em {dataBR(c.fim)}
+        </>
+      ),
+      acao: [c.emprestimo ? "Ver ficha" : "Renovar?", () => (c.emprestimo ? onFicha(c.player_id) : onConversar(String(c.player_id)))],
+    })),
+    ...a.promessas.map((p) => ({
+      chave: `r${p.player_id}`,
+      icone: "handshake",
+      cor: "text-gold",
+      rosto: p.player_id,
+      texto: (
+        <>
+          Você prometeu <b>{p.promessa}</b> a <b>{p.nome}</b>
+          <span className="text-muted">
+            {" "}· depois: {plural(p.desde_entao.jogos_do_clube, "jogo", "jogos")} do clube, {p.desde_entao.minutos} min dele
+          </span>
+        </>
+      ),
+      acao: ["Abrir conversa", () => onConversar(String(p.player_id))],
+    })),
+    ...a.sem_espaco.map((j) => ({
+      chave: `e${j.player_id}`,
+      icone: "event_seat",
+      cor: "text-muted",
+      rosto: j.player_id,
+      texto: (
+        <>
+          <b>{j.nome}</b> jogou {j.minutos} min em {plural(j.jogos_do_clube, "jogo", "jogos")} do clube
+          {j.valor && <span className="text-muted"> · vale <Dinheiro valor={j.valor} /></span>}
+        </>
+      ),
+      acao: ["Ver ficha", () => onFicha(j.player_id)],
+    })),
+  ];
+  if (linhas.length === 0) return null;
+  return (
+    <section aria-labelledby="atencao" className="mb-10 rounded-md border border-pitch-800 bg-pitch-900">
+      <h2 id="atencao" className="flex items-center gap-2 border-b border-pitch-800 px-4 py-3 font-kit text-xl font-semibold uppercase">
+        <span aria-hidden="true" className="icone text-gold">priority_high</span>
+        Precisa de atenção
+        <span className="ml-1 rounded-full bg-pitch-700 px-2 text-sm text-muted">{linhas.length}</span>
+      </h2>
+      <ul className="divide-y divide-pitch-800">
+        {linhas.map((l) => (
+          <li key={l.chave}>
+            {/* a linha inteira é o botão; no celular a ação vira só uma seta, para não ocupar outra linha */}
+            <button onClick={l.acao[1]} className="group flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-pitch-800/60">
+              <span aria-hidden="true" className={`icone ${l.cor}`}>{l.icone}</span>
+              <Rosto id={l.rosto} className="size-8 shrink-0" />
+              <span className="min-w-0 flex-1 leading-snug">{l.texto}</span>
+              <span className="hidden shrink-0 rounded-full border border-pitch-700 px-3 py-1 text-sm group-hover:border-destaque group-hover:text-destaque sm:inline">
+                {l.acao[0]}
+              </span>
+              <span aria-hidden="true" className="icone text-muted sm:hidden">chevron_right</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// Ficha do jogador numa gaveta: quem ele é, a fase (nota jogo a jogo), o valor ao longo do tempo, o contrato e
+// tudo o que passou por ele no clube. <dialog> nativo: prende o foco e fecha no Esc.
+function Ficha({ id, pid, clube, onFechar, onConversar }) {
+  const ref = useRef(null);
+  const { dados: f, erro } = useDados(() => api.jogador(id, pid), [id, pid]);
+  useEffect(() => ref.current.showModal(), []);
+  const fechar = () => ref.current.close();
+  const c = f?.contrato;
+  return (
+    <dialog ref={ref} onClose={onFechar} onClick={(e) => e.target === ref.current && fechar()} aria-label="Ficha do jogador" className="gaveta">
+      <div className="h-full overflow-y-auto overscroll-contain">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-pitch-800 bg-pitch-950/95 px-5 py-2 backdrop-blur">
+          <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Ficha · {clube}</span>
+          <button onClick={fechar} aria-label="Fechar a ficha" className="-mr-2 grid size-9 place-items-center rounded-full hover:bg-pitch-800">
+            <span aria-hidden="true" className="icone">close</span>
+          </button>
+        </div>
+        {erro && <div className="p-5"><Erro mensagem={erro} /></div>}
+        {f && (
+          <div className="space-y-9 px-5 pb-10 pt-6 sm:px-7">
+            <header className="flex items-center gap-5">
+              <Rosto id={f.player_id} className={`size-24 shrink-0 ring-2 ring-destaque sm:size-28 ${f.no_elenco ? "" : "grayscale"}`} />
+              <div className="min-w-0 space-y-2">
+                <h2 className="font-kit text-4xl font-extrabold uppercase leading-none sm:text-5xl">{f.nome}</h2>
+                <p className="flex flex-wrap items-center gap-2 text-muted">
+                  {f.posicao != null && <Posicao codigo={f.posicao} />}
+                  {[f.idade && `${f.idade} anos`, !f.no_elenco && "não está mais no elenco"].filter(Boolean).join(" · ")}
+                  {f.valor && <Dinheiro valor={f.valor} className="font-kit text-xl font-bold text-gold" />}
+                </p>
+                {f.sinais.length > 0 && (
+                  <ul className="flex flex-wrap gap-1">
+                    {f.sinais.map((s) => (
+                      <li key={s} className={`rounded-sm px-1.5 font-kit text-xs font-semibold uppercase tracking-wide ${corDoSinal(s)}`}>{s}</li>
+                    ))}
+                  </ul>
+                )}
+                {f.no_elenco && (
+                  <button
+                    onClick={() => onConversar(String(f.player_id))}
+                    className="flex items-center gap-1.5 rounded-full bg-destaque px-3 py-1 text-sm font-semibold text-pitch-950 hover:brightness-110"
+                  >
+                    <span aria-hidden="true" className="icone text-base">chat</span>
+                    Chamar pra conversa
+                  </button>
+                )}
+              </div>
+            </header>
+
+            <section>
+              <h3 className="mb-3 font-kit text-xl font-semibold uppercase">Pelo clube</h3>
+              {f.total.jogos === 0 ? (
+                <p className="text-muted">Ainda não entrou em campo pelo clube nos jogos que o Vestiário guardou.</p>
+              ) : (
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-pitch-700 font-kit text-sm uppercase tracking-wide text-muted">
+                      <th className="py-1 font-semibold">Temporada</th>
+                      {["J", "G", "A", "Min.", "Nota"].map((t) => (
+                        <th key={t} className="py-1 text-right font-semibold">{t}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="font-kit text-xl">
+                    {[...f.temporadas.map((t) => [t.ano, t]), ...(f.temporadas.length > 1 ? [["Total", f.total]] : [])].map(([rotulo, n]) => (
+                      <tr key={rotulo} className={`border-b border-pitch-800 ${rotulo === "Total" ? "font-bold" : ""}`}>
+                        <td className="py-1.5">{rotulo}</td>
+                        <td className="text-right">{n.jogos}</td>
+                        <td className="text-right">{n.gols}</td>
+                        <td className="text-right">{n.assistencias}</td>
+                        <td className="text-right">{n.minutos}</td>
+                        <td className="text-right">{n.nota?.toFixed(1) ?? "–"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+
+            <Fase jogos={f.jogos} />
+            <ValorNoTempo valores={f.valores} />
+
+            {c && (
+              <section>
+                <h3 className="mb-3 font-kit text-xl font-semibold uppercase">{c.emprestimo ? "Empréstimo" : "Contrato"}</h3>
+                <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-md bg-pitch-800">
+                  {(c.emprestimo
+                    ? [["Emprestado até", dataBR(c.fim)]]
+                    : [["Salário/sem.", <Dinheiro key="s" valor={c.salario_semanal} />], ["Multa", c.multa ? <Dinheiro key="m" valor={c.multa} /> : "sem multa"], ["Até", dataBR(c.fim)]]
+                  ).map(([rotulo, valor]) => (
+                    <div key={rotulo} className="bg-pitch-900 px-3 py-2">
+                      <dt className="text-xs uppercase text-muted">{rotulo}</dt>
+                      <dd className="font-kit text-xl font-bold">{valor}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
+
+            {f.promessas.length > 0 && (
+              <section>
+                <h3 className="mb-3 font-kit text-xl font-semibold uppercase">Promessas</h3>
+                <ul className="space-y-2">
+                  {f.promessas.map((p) => (
+                    <li key={p.feita_em + p.promessa} className="flex items-baseline gap-2">
+                      <span aria-hidden="true" className="icone text-base text-gold">handshake</span>
+                      <span>
+                        <b>{p.promessa}</b>
+                        <span className="text-muted"> · em {dataBR(p.feita_em)} · depois: {plural(p.desde_entao.jogos_do_clube, "jogo", "jogos")} do clube, {p.desde_entao.minutos} min dele</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {f.propostas.length > 0 && (
+              <section>
+                <h3 className="mb-3 font-kit text-xl font-semibold uppercase">Propostas recebidas</h3>
+                <ul className="divide-y divide-pitch-800">
+                  {f.propostas.map((p) => (
+                    <li key={`${p.clube.idx}-${p.valor}`} className="flex items-center gap-2 py-2">
+                      <Escudo id={p.clube.escudo} nome={p.clube.nome} className="size-6" />
+                      <span className="min-w-0 flex-1 truncate">{p.clube.nome}</span>
+                      <Dinheiro valor={p.valor} className="font-kit text-lg font-bold" />
+                      <span className="w-24 text-right text-sm text-muted">{p.situacao === "aberta" ? "aberta" : `até ${dataBR(p.ultima)}`}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {f.jogos.length > 0 && (
+              <section>
+                <h3 className="mb-3 font-kit text-xl font-semibold uppercase">Jogo a jogo</h3>
+                <ul className="divide-y divide-pitch-800 text-sm">
+                  {f.jogos.map((j) => {
+                    const res = j.placar[0] > j.placar[1] ? "V" : j.placar[0] < j.placar[1] ? "D" : "E";
+                    return (
+                      <li key={j.partida_id} className={`grid grid-cols-[4.5rem_1fr_auto_3rem_2.5rem] items-center gap-2 border-l-4 py-2 pl-2 ${BORDA_RESULTADO[res]}`}>
+                        <span className="text-muted">{dataBR(j.data).slice(0, 5)}</span>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Escudo id={j.adversario.escudo} nome={j.adversario.nome} className="size-5" />
+                          <span className="truncate">{j.em_casa ? "" : "@ "}{j.adversario.nome}</span>
+                        </span>
+                        <span className="font-kit text-lg">
+                          {j.placar[0]}–{j.placar[1]}
+                          {j.gols + j.assistencias > 0 && (
+                            <span className="ml-2 text-destaque">{[j.gols && `${j.gols}G`, j.assistencias && `${j.assistencias}A`].filter(Boolean).join(" ")}</span>
+                          )}
+                        </span>
+                        <span className="text-right text-muted">{j.minutos}′</span>
+                        <span className={`text-right font-kit text-lg ${corDaNota(j.nota)}`}>{j.nota?.toFixed(1) ?? "–"}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+          </div>
+        )}
+      </div>
+    </dialog>
+  );
+}
+
+const corDaNota = (n) => (n == null ? "text-muted" : n >= 6.8 ? "text-neon" : n <= 5.5 ? "text-cartao" : "");
+
+// A fase: a nota do PES nos últimos jogos, em barras da mais antiga à mais recente
+function Fase({ jogos }) {
+  const notas = jogos.filter((j) => j.nota != null).slice(0, 15).reverse();
+  if (notas.length < 2) return null;
+  return (
+    <section>
+      <h3 className="mb-3 flex items-baseline justify-between font-kit text-xl font-semibold uppercase">
+        Fase
+        <span className="font-sans text-sm font-normal normal-case text-muted">nota nos últimos {notas.length} jogos</span>
+      </h3>
+      <ol className="flex h-28 items-end gap-1 border-b border-pitch-700">
+        {notas.map((j) => (
+          <li key={j.partida_id} className="flex h-full flex-1 flex-col justify-end" title={`${dataBR(j.data)} · ${j.adversario.nome} · nota ${j.nota.toFixed(1)}`}>
+            <span className={`text-center font-kit text-xs ${corDaNota(j.nota)}`}>{j.nota.toFixed(1)}</span>
+            <span
+              className={`block rounded-t-sm ${j.nota >= 6.8 ? "bg-neon" : j.nota <= 5.5 ? "bg-cartao" : "bg-muted/60"}`}
+              style={{ height: `${Math.max(4, (j.nota - 3) * 14)}%` }}
+            />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+// Valor de mercado em cada sincronização; só vira gráfico quando o valor mudou
+function ValorNoTempo({ valores }) {
+  if (valores.length === 0) return null;
+  const [primeiro, ultimo] = [valores[0], valores[valores.length - 1]];
+  const mudou = valores.some((v) => v.valor !== primeiro.valor);
+  const [min, max] = [Math.min(...valores.map((v) => v.valor)), Math.max(...valores.map((v) => v.valor))];
+  const pontos = valores.map((v, i) => `${(i / (valores.length - 1 || 1)) * 100},${28 - ((v.valor - min) / (max - min || 1)) * 24}`).join(" ");
+  return (
+    <section>
+      <h3 className="mb-3 font-kit text-xl font-semibold uppercase">Valor de mercado</h3>
+      {mudou ? (
+        <>
+          <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-20 w-full" aria-hidden="true">
+            <polyline points={pontos} fill="none" stroke="var(--color-gold)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          </svg>
+          <p className="mt-1 flex justify-between text-sm text-muted">
+            <span><Dinheiro valor={primeiro.valor} className="font-kit text-lg text-chalk" /> em {dataBR(primeiro.data)}</span>
+            <span><Dinheiro valor={ultimo.valor} className="font-kit text-lg text-gold" /> em {dataBR(ultimo.data)}</span>
+          </p>
+        </>
+      ) : (
+        <p className="text-muted">
+          <Dinheiro valor={ultimo.valor} className="font-kit text-2xl font-bold text-gold" /> sem mudança desde {dataBR(primeiro.data)}
+        </p>
+      )}
     </section>
   );
 }

@@ -221,3 +221,15 @@ def test_coletiva(cliente, monkeypatch):
     monkeypatch.setattr(ia, "responder", lambda *a: {"legenda": 'Técnico: "Gostei."'})
     f = cliente.post("/api/carreiras/1/coletiva/respostas", json={"respostas": ["Gostei."]}).json()
     assert f["posts"][0]["legenda"] == 'Técnico: "Gostei."'
+
+
+def test_ficha_e_atencao(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save("2026-03-01", [
+        partida("2026-02-01", 0, 1, (2, 0), [atuacao(10, 0, 2)])]))
+    (api.SAVES).mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    cliente.post("/api/sincronizar")
+    f = cliente.get("/api/carreiras/1/jogadores/10").json()
+    assert f["total"]["gols"] == 2 and isinstance(f["sinais"], list)
+    assert cliente.get("/api/carreiras/1/jogadores/999").status_code == 404
+    assert set(cliente.get("/api/carreiras/1/atencao").json()) == {"propostas", "contratos", "promessas", "sem_espaco"}

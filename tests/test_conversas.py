@@ -100,3 +100,23 @@ def test_promessa_guardada_e_cobrada_com_os_jogos_depois_dela(con, monkeypatch):
         "desde_entao": {"jogos_do_clube": 1, "jogos": 1, "minutos": 20, "nota_media": 5.8}}]
     assert len(banco.promessas(con, 1, 11)) == 1  # promessa vazia não é guardada
     assert "promessas_do_professor" not in banco.fatos_do_jogador(con, 1, 10)
+
+
+def test_ficha_do_jogador(con):
+    f = banco.ficha(con, 1, 10)
+    assert (f["nome"], f["idade"], f["valor"], f["no_elenco"]) == ("Titular", 25, 8000 * MOEDA, True)
+    assert f["total"] == {"jogos": 2, "gols": 2, "assistencias": 0, "minutos": 180, "nota": 6.8}
+    assert f["temporadas"] == [{"ano": 2026, **f["total"]}]
+    assert [(j["data"], j["adversario"]["nome"], j["em_casa"], j["placar"], j["nota"]) for j in f["jogos"]] == [
+        ("2026-02-08", "Clube B", False, [0, 0], 6.0), ("2026-02-01", "Clube B", True, [2, 0], 7.6)]
+    assert f["valores"] == [{"data": "2026-03-01", "valor": 8000 * MOEDA}]
+    assert f["contrato"]["fim"] == "2028-01-31" and [p["clube"]["nome"] for p in f["propostas"]] == ["Clube B"]
+    assert banco.ficha(con, 1, 999) is None
+
+
+def test_precisa_de_atencao(con):
+    a = conversas.atencao(con, 1)
+    assert [(p["nome"], p["clube"]["nome"]) for p in a["propostas"]] == [("Titular", "Clube B")]
+    assert a["contratos"] == [{"player_id": 12, "nome": "Veterano", "fim": "2026-06-30", "emprestimo": False}]
+    assert [j["nome"] for j in a["sem_espaco"]] == ["Reserva", "Veterano"]  # sem valor de mercado: por nome
+    assert a["promessas"] == []

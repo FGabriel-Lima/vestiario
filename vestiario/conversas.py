@@ -101,6 +101,27 @@ def contatos(con: sqlite3.Connection, cid: int) -> list[dict]:
     return lista
 
 
+def atencao(con: sqlite3.Connection, cid: int) -> dict:
+    """O que pede uma decisão do treinador agora, decidido pelo código: propostas abertas, contratos e empréstimos que
+    acabam em até 6 meses, promessas feitas (com o que veio depois) e os jogadores mais valiosos jogando pouco."""
+    s, jogos, abertas = _contexto(con, cid)
+    elenco = banco.elenco_para_conversa(con, cid)
+    valor = {r[0]: r[1] for r in con.execute("SELECT player_id, valor FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
+    limite = _seis_meses(s["data_jogo"])
+    prometidos = {r[0] for r in con.execute("SELECT DISTINCT player_id FROM promessa WHERE carreira_id = ?", (cid,))}
+    return {
+        "propostas": [{k: p[k] for k in ("player_id", "nome", "clube", "valor", "valor_mercado")} for p in abertas],
+        "contratos": sorted(({"player_id": l["player_id"], "nome": l["nome"], "fim": c["fim"], "emprestimo": c["emprestimo"]}
+                             for l in elenco if (c := l["contrato"]) and c["fim"] <= limite), key=lambda x: (x["fim"], x["nome"])),
+        "promessas": [{"player_id": l["player_id"], "nome": l["nome"], **p} for l in elenco if l["player_id"] in prometidos
+                      for p in banco.promessas(con, cid, l["player_id"], limite=1)],
+        "sem_espaco": [{"player_id": l["player_id"], "nome": l["nome"], "jogos": l["jogos"], "minutos": l["minutos"],
+                        "jogos_do_clube": jogos, "valor": (valor.get(l["player_id"]) or 0) * banco.MOEDA or None}
+                       for l in sorted((l for l in elenco if "joga pouco" in sinais(l, jogos, s["data_jogo"], abertas)),
+                                       key=lambda l: (-(valor.get(l["player_id"]) or 0), l["nome"]))][:3],
+    }
+
+
 def _atalhos(contato: str, fatos: dict) -> list[str]:
     if contato == "auxiliar":
         a = ["Como está o elenco?", "Quem está jogando pouco?"]

@@ -189,6 +189,24 @@ def post_feed(cid: int):
             raise HTTPException(503, str(e))
 
 
+@app.get("/api/carreiras/{cid}/jogadores/{pid}")
+def get_jogador(cid: int, pid: int):
+    """Ficha do jogador: números, jogo a jogo, valor, contrato, propostas, promessas e o estado dele (sinais)."""
+    with _con() as con:
+        _carreira(con, cid)
+        if (f := banco.ficha(con, cid, pid)) is None:
+            raise HTTPException(404, "Jogador não passou pelo clube")
+        f["sinais"] = next((c["sinais"] for c in conversas.contatos(con, cid) if c.get("player_id") == pid), [])
+        return f
+
+
+@app.get("/api/carreiras/{cid}/atencao")
+def get_atencao(cid: int):
+    with _con() as con:
+        _carreira(con, cid)
+        return conversas.atencao(con, cid)
+
+
 @app.post("/api/carreiras/{cid}/coletiva")
 def post_coletiva(cid: int):
     """Abre a coletiva do jogo mais recente: o repórter faz as perguntas."""
