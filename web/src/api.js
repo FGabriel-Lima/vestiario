@@ -29,6 +29,13 @@ export const api = {
       body: JSON.stringify({ texto }),
     }),
   atualizarFeed: (id) => pedir(`/carreiras/${id}/feed`, { method: "POST" }),
+  abrirColetiva: (id) => pedir(`/carreiras/${id}/coletiva`, { method: "POST" }),
+  responderColetiva: (id, respostas) =>
+    pedir(`/carreiras/${id}/coletiva/respostas`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ respostas }),
+    }),
   parecer: (id, p) =>
     pedir(`/carreiras/${id}/propostas/parecer`, {
       method: "POST",

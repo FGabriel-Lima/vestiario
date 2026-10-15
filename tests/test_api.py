@@ -204,3 +204,20 @@ def test_sincronizar_sem_ia_avisa_e_nao_publica(cliente, monkeypatch):
     avisos = cliente.post("/api/sincronizar").json()["avisos"]
     assert any("Feed de" in a and "aba Feed" in a for a in avisos)
     assert cliente.get("/api/carreiras/1/feed").json()["publicado"] is False
+
+
+def test_coletiva(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save("2026-03-01", [
+        partida("2026-02-01", 0, 1, (2, 0), [atuacao(10, 0, 2)])]))
+    (api.SAVES).mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    cliente.post("/api/sincronizar")
+    assert cliente.post("/api/carreiras/1/coletiva").status_code == 404  # feed ainda não publicado: sem jogo
+    monkeypatch.setattr(ia, "responder", lambda *a: {"posts": []})
+    cliente.post("/api/carreiras/1/feed")
+    monkeypatch.setattr(ia, "responder", lambda *a: {"perguntas": ["E o jogo?"]})
+    assert cliente.post("/api/carreiras/1/coletiva").json()["coletiva"]["perguntas"] == ["E o jogo?"]
+    assert cliente.post("/api/carreiras/1/coletiva/respostas", json={"respostas": []}).status_code == 400
+    monkeypatch.setattr(ia, "responder", lambda *a: {"legenda": 'Técnico: "Gostei."'})
+    f = cliente.post("/api/carreiras/1/coletiva/respostas", json={"respostas": ["Gostei."]}).json()
+    assert f["posts"][0]["legenda"] == 'Técnico: "Gostei."'

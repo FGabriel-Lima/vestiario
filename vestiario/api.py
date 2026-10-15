@@ -189,6 +189,33 @@ def post_feed(cid: int):
             raise HTTPException(503, str(e))
 
 
+@app.post("/api/carreiras/{cid}/coletiva")
+def post_coletiva(cid: int):
+    """Abre a coletiva do jogo mais recente: o repórter faz as perguntas."""
+    with _con() as con:
+        _carreira(con, cid)
+        try:
+            return feed.abrir_coletiva(con, cid)
+        except LookupError as e:
+            raise HTTPException(404, str(e))
+
+
+class Respostas(BaseModel):
+    respostas: list[str]
+
+
+@app.post("/api/carreiras/{cid}/coletiva/respostas")
+def post_respostas(cid: int, r: Respostas):
+    with _con() as con:
+        _carreira(con, cid)
+        try:
+            return feed.responder_coletiva(con, cid, r.respostas)
+        except LookupError as e:
+            raise HTTPException(404, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
 @app.get("/api/carreiras/{cid}/conversas")
 def get_contatos(cid: int):
     with _con() as con:

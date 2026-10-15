@@ -1071,6 +1071,7 @@ function Feed({ id }) {
           {falha && <p className="mt-2 text-sm text-cartao">{falha}</p>}
         </div>
       )}
+      {f.coletiva && <Coletiva key={f.coletiva.jogo.data} id={id} coletiva={f.coletiva} onDada={() => setVersao((v) => v + 1)} />}
       {f.posts.length === 0 ? (
         <p className="text-muted">Nenhum post ainda. Carregue os posts do save mais recente.</p>
       ) : (
@@ -1083,6 +1084,94 @@ function Feed({ id }) {
         </ol>
       )}
     </div>
+  );
+}
+
+// Sala de imprensa: o repórter do ge pergunta sobre o último jogo e o que o treinador responde vira post do ge,
+// com as falas copiadas como foram escritas.
+function Coletiva({ id, coletiva, onDada }) {
+  const { jogo, perguntas } = coletiva;
+  const [respostas, setRespostas] = useState(() => (perguntas ?? []).map(() => ""));
+  const [esperando, setEsperando] = useState(false);
+  const [falha, setFalha] = useState(null);
+  const chamar = (pedido) => {
+    setEsperando(true);
+    setFalha(null);
+    pedido
+      .then(onDada)
+      .catch((e) => setFalha(e.message))
+      .finally(() => setEsperando(false));
+  };
+  const placar = `${jogo.mandante.nome} ${jogo.mandante.gols} x ${jogo.visitante.gols} ${jogo.visitante.nome}`;
+  return (
+    <section aria-label="Coletiva pós-jogo" className="mb-10 overflow-hidden rounded-xl border border-pitch-700 bg-pitch-900">
+      <header className="flex items-center gap-3 border-b border-pitch-800 px-4 py-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#06aa48] text-white">
+          <span aria-hidden="true" className="icone">mic</span>
+        </span>
+        <p className="min-w-0 leading-tight">
+          <span className="block font-kit text-lg font-bold uppercase tracking-wide">Coletiva pós-jogo</span>
+          <span className="block truncate text-sm text-muted">{placar} · {dataBR(jogo.data)}</span>
+        </p>
+      </header>
+      {!perguntas ? (
+        <div aria-live="polite" className="p-4">
+          {esperando ? (
+            <p className="flex items-center gap-2 text-muted">
+              <span aria-hidden="true" className="icone animate-spin text-[#06aa48] motion-reduce:animate-none">progress_activity</span>
+              O repórter do ge está preparando as perguntas.
+            </p>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-muted">O ge quer ouvir o técnico. O que você responder sai no perfil deles, do jeito que você escrever.</p>
+              <button
+                onClick={() => chamar(api.abrirColetiva(id))}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-[#06aa48] px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-white hover:brightness-110"
+              >
+                <span aria-hidden="true" className="icone">mic</span>
+                Ir para a coletiva
+              </button>
+            </>
+          )}
+          {falha && <p className="mt-2 text-sm text-cartao">{falha}</p>}
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            chamar(api.responderColetiva(id, respostas));
+          }}
+          className="space-y-5 p-4"
+        >
+          {perguntas.map((p, i) => (
+            <div key={i}>
+              <label htmlFor={`resposta-${i}`} className="mb-2 block border-l-4 border-[#06aa48] pl-3 font-semibold leading-snug">
+                {p}
+              </label>
+              <textarea
+                id={`resposta-${i}`}
+                rows={2}
+                value={respostas[i]}
+                onChange={(e) => setRespostas(respostas.map((r, k) => (k === i ? e.target.value : r)))}
+                placeholder="Sua resposta (em branco, você não comenta)"
+                className="w-full resize-y rounded-md border border-pitch-700 bg-pitch-950 px-3 py-2 leading-relaxed placeholder:text-muted"
+              />
+            </div>
+          ))}
+          {falha && <p className="text-sm text-cartao">{falha}</p>}
+          <button
+            type="submit"
+            disabled={esperando || !respostas.some((r) => r.trim())}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-[#06aa48] px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-white hover:brightness-110 disabled:opacity-50"
+          >
+            <span aria-hidden="true" className={`icone ${esperando ? "animate-spin motion-reduce:animate-none" : ""}`}>
+              {esperando ? "progress_activity" : "send"}
+            </span>
+            {esperando ? "O ge está publicando" : "Encerrar a coletiva"}
+          </button>
+        </form>
+      )}
+    </section>
   );
 }
 
@@ -1116,6 +1205,19 @@ function Post({ post, perfis }) {
         <span className="mr-1.5 font-semibold">{perfil.arroba}</span>
         {post.legenda}
       </p>
+      {post.tipo === "coletiva" && (
+        <details className="border-t border-pitch-800 px-4 py-3 text-sm">
+          <summary className="cursor-pointer font-semibold text-muted hover:text-chalk">Ler a entrevista completa</summary>
+          <dl className="mt-3 space-y-3">
+            {post.dados.entrevista.map((e, i) => (
+              <div key={i}>
+                <dt className="border-l-4 border-[#06aa48] pl-3 font-semibold">{e.pergunta}</dt>
+                <dd className="mt-1 pl-4 leading-relaxed">{e.resposta}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
     </article>
   );
 }
@@ -1250,6 +1352,29 @@ function ArteDoPost({ post }) {
           </div>
         </div>
       );
+    case "coletiva": {
+      const fala = post.dados.entrevista[0].resposta;
+      return (
+        <div className={base}>
+          <p className="flex items-center gap-1.5 self-start rounded-sm bg-[#06aa48] px-2 py-0.5 font-kit text-lg font-extrabold uppercase tracking-[0.15em] text-white">
+            <span aria-hidden="true" className="icone text-xl">mic</span>
+            Coletiva
+          </p>
+          <blockquote className={`line-clamp-5 font-kit font-extrabold uppercase leading-tight ${
+            fala.length > 120 ? "text-xl sm:text-2xl" : fala.length > 50 ? "text-2xl sm:text-4xl" : "text-3xl sm:text-4xl"}`}>
+            <span aria-hidden="true" className="text-[#06aa48]">“</span>
+            {fala}
+            <span aria-hidden="true" className="text-[#06aa48]">”</span>
+          </blockquote>
+          <p className="flex items-center gap-2 font-kit text-base font-semibold uppercase">
+            <Escudo id={d.mandante.escudo} nome={d.mandante.nome} className="size-7" />
+            {d.mandante.gols} x {d.visitante.gols}
+            <Escudo id={d.visitante.escudo} nome={d.visitante.nome} className="size-7" />
+            <span className="opacity-70">· o técnico depois do jogo</span>
+          </p>
+        </div>
+      );
+    }
     case "proposta":
       return (
         <div className={base}>

@@ -80,3 +80,25 @@ def test_jogo_no_dia_da_sincronizacao_anterior_entra_uma_vez(monkeypatch):
     assert [p["tipo"] for p in feed.atualizar(c, 1)["posts"]].count("fim_de_jogo") == 1
     banco.gravar(c, "ML00000000", fazer_save("2026-02-01", [jogo((0, 1), [atuacao(50, 1, 1)])], competicoes=COMPETICOES), AGORA)
     assert [p["tipo"] for p in feed.atualizar(c, 1)["posts"]].count("fim_de_jogo") == 1  # não repete
+
+
+def test_coletiva_do_ultimo_jogo_vira_post_do_ge(con, monkeypatch):
+    monkeypatch.setattr(ia, "responder", lambda *a: {"posts": []})
+    assert feed.atualizar(con, 1)["coletiva"] == {"jogo": feed.ler(con, 1)["posts"][-1]["dados"], "perguntas": None}
+    # sem IA, as perguntas saem do código
+    monkeypatch.setattr(ia, "responder", lambda *a: (_ for _ in ()).throw(ia.IAIndisponivel("fora")))
+    perguntas = feed.abrir_coletiva(con, 1)["coletiva"]["perguntas"]
+    assert perguntas[0] == "Como você avalia o resultado contra o Clube C?"
+    assert feed.abrir_coletiva(con, 1)["coletiva"]["perguntas"] == perguntas  # guardadas: não pergunta de novo
+    with pytest.raises(ValueError):
+        feed.responder_coletiva(con, 1, ["", "", ""])
+    # citação que não está nas respostas é trocada pela legenda do código
+    monkeypatch.setattr(ia, "responder", lambda *a: {"legenda": 'O técnico disse: "fomos campeões".'})
+    f = feed.responder_coletiva(con, 1, ["Vencemos com autoridade.", "", "Agora é o Clube A."])
+    assert f["coletiva"] is None
+    i = next(i for i, p in enumerate(f["posts"]) if p["tipo"] == "coletiva")
+    post = f["posts"][i]
+    assert post["perfil"] == "geglobo" and f["posts"][i + 1]["tipo"] == "fim_de_jogo"  # logo acima do jogo
+    assert post["dados"]["entrevista"] == [{"pergunta": perguntas[0], "resposta": "Vencemos com autoridade."},
+                                           {"pergunta": perguntas[2], "resposta": "Agora é o Clube A."}]
+    assert post["legenda"] == '"Vencemos com autoridade.", disse o técnico do Clube A depois do jogo.'

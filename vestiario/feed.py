@@ -196,14 +196,106 @@ def atualizar(con: sqlite3.Connection, cid: int) -> dict:
     return ler(con, cid)
 
 
+SISTEMA_COLETIVA = """Você é repórter do ge numa entrevista coletiva com o treinador de um clube, logo depois de um \
+jogo numa carreira de Master League do PES. Faça 3 perguntas curtas e diretas sobre o jogo, como um repórter de
+verdade: o resultado, quem decidiu ou foi bem (ou mal) e o que vem pela frente. Use SOMENTE os fatos do JSON: não
+invente lances, lesões, polêmicas, declarações nem histórico. Não diga o nome do treinador. Português do Brasil."""
+
+ESQUEMA_COLETIVA = {"type": "OBJECT", "properties": {"perguntas": {"type": "ARRAY", "items": {"type": "STRING"}}},
+                    "required": ["perguntas"]}
+
+SISTEMA_MATERIA = """Você escreve a legenda de um post do ge no Instagram sobre a entrevista coletiva do treinador de \
+um clube depois de um jogo numa carreira de Master League do PES. Tom jornalístico, de 1 a 3 frases. Cite entre aspas
+um ou dois trechos das respostas, copiados palavra por palavra. Use só os fatos do JSON. Não diga o nome do treinador:
+chame-o de "o técnico do" clube. Português do Brasil."""
+
+ESQUEMA_MATERIA = {"type": "OBJECT", "properties": {"legenda": {"type": "STRING"}}, "required": ["legenda"]}
+
+
+def coletiva(con: sqlite3.Connection, cid: int) -> dict | None:
+    """A coletiva do jogo mais recente do clube no feed (None se não há jogo ou se ela já foi dada). As perguntas
+    ficam None até o treinador entrar na sala de imprensa."""
+    r = con.execute("SELECT dados FROM post WHERE carreira_id = ? AND tipo = 'fim_de_jogo' ORDER BY data DESC LIMIT 1",
+                    (cid,)).fetchone()
+    if r is None:
+        return None
+    jogo = json.loads(r[0])
+    c = con.execute("SELECT perguntas, respostas FROM coletiva WHERE carreira_id = ? AND data = ?",
+                    (cid, jogo["data"])).fetchone()
+    if c and c[1] is not None:
+        return None
+    return {"jogo": jogo, "perguntas": json.loads(c[0]) if c else None}
+
+
+def _perguntas_padrao(jogo: dict) -> list[str]:
+    adversario = jogo["visitante" if jogo["nosso_lado"] == "mandante" else "mandante"]["nome"]
+    p = [f"Como você avalia o resultado contra o {adversario}?"]
+    if m := jogo.get("melhor_em_campo"):
+        p.append(f"{m['nome']} foi o melhor em campo. O que achou da atuação?")
+    p.append("O que o time precisa melhorar para o próximo jogo?")
+    return p
+
+
+def abrir_coletiva(con: sqlite3.Connection, cid: int) -> dict:
+    """Gera (uma vez) as perguntas do repórter. Sem IA, as perguntas saem do código."""
+    c = coletiva(con, cid)
+    if c is None:
+        raise LookupError("Não há jogo para a coletiva")
+    if c["perguntas"] is None:
+        try:
+            r = ia.responder(SISTEMA_COLETIVA, {"clube": banco._ultima(con, cid)["clube_nome"],
+                                                "jogo": _sem_imagem(c["jogo"])}, ESQUEMA_COLETIVA)
+            perguntas = [str(p).strip() for p in r.get("perguntas", []) if str(p).strip()][:3]
+        except ia.IAIndisponivel:
+            perguntas = []
+        with con:
+            con.execute("INSERT INTO coletiva VALUES(?, ?, ?, NULL, NULL, ?)", (
+                cid, c["jogo"]["data"], json.dumps(perguntas or _perguntas_padrao(c["jogo"]), ensure_ascii=False),
+                datetime.now().isoformat(timespec="seconds")))
+    return ler(con, cid)
+
+
+def responder_coletiva(con: sqlite3.Connection, cid: int, respostas: list[str]) -> dict:
+    """Guarda as respostas (pergunta sem resposta fica de fora do post) e a legenda do ge, que só pode citar entre
+    aspas o que o treinador disse; se citar outra coisa, a legenda sai do código."""
+    c = coletiva(con, cid)
+    if c is None or c["perguntas"] is None:
+        raise LookupError("Não há coletiva aberta")
+    respostas = [str(r).strip() for r in respostas]
+    if len(respostas) != len(c["perguntas"]) or not any(respostas):
+        raise ValueError("Responda a pelo menos uma pergunta")
+    entrevista = [{"pergunta": p, "resposta": r} for p, r in zip(c["perguntas"], respostas) if r]
+    clube = banco._ultima(con, cid)["clube_nome"]
+    try:
+        legenda = str(ia.responder(SISTEMA_MATERIA, {"clube": clube, "jogo": _sem_imagem(c["jogo"]),
+                                                     "entrevista": entrevista}, ESQUEMA_MATERIA).get("legenda", "")).strip()
+    except ia.IAIndisponivel:
+        legenda = ""
+    falas = " ".join(r.casefold() for r in respostas)
+    if not legenda or any(q.strip(" .,!?…").casefold() not in falas for q in re.findall(r'[“"]([^”"]+)[”"]', legenda)):
+        legenda = f'"{entrevista[0]["resposta"]}", disse o técnico do {clube} depois do jogo.'
+    with con:
+        con.execute("UPDATE coletiva SET respostas = ?, legenda = ? WHERE carreira_id = ? AND data = ?",
+                    (json.dumps(respostas, ensure_ascii=False), legenda, cid, c["jogo"]["data"]))
+    return ler(con, cid)
+
+
 def ler(con: sqlite3.Connection, cid: int) -> dict:
     s = banco._ultima(con, cid)
     t = con.execute("SELECT pes_id FROM time WHERE carreira_id = ? AND idx = ?", (cid, s["clube_idx"])).fetchone()
-    posts = [{"edicao": r[0], "perfil": r[1], "tipo": r[2], "data": r[3], "dados": json.loads(r[4]), "legenda": r[5]}
-             for r in con.execute("SELECT edicao, perfil, tipo, data, dados, legenda FROM post WHERE carreira_id = ? "
-                                  "AND ordem >= 0 ORDER BY edicao DESC, data DESC, ordem DESC", (cid,))]
+    dadas = {r[0]: (json.loads(r[1]), json.loads(r[2]), r[3]) for r in con.execute(
+        "SELECT data, perguntas, respostas, legenda FROM coletiva WHERE carreira_id = ? AND respostas IS NOT NULL", (cid,))}
+    posts = []
+    for r in con.execute("SELECT edicao, perfil, tipo, data, dados, legenda FROM post WHERE carreira_id = ? "
+                         "AND ordem >= 0 ORDER BY edicao DESC, data DESC, ordem DESC", (cid,)):
+        p = {"edicao": r[0], "perfil": r[1], "tipo": r[2], "data": r[3], "dados": json.loads(r[4]), "legenda": r[5]}
+        if p["tipo"] == "fim_de_jogo" and (c := dadas.get(p["data"])):  # a coletiva sai logo depois do jogo
+            perguntas, respostas, legenda = c
+            posts.append({**p, "perfil": "geglobo", "tipo": "coletiva", "legenda": legenda, "dados": {
+                **p["dados"], "entrevista": [{"pergunta": q, "resposta": a} for q, a in zip(perguntas, respostas) if a]}})
+        posts.append(p)
     publicado = con.execute("SELECT 1 FROM post WHERE carreira_id = ? AND edicao = ? LIMIT 1",
                             (cid, s["data_jogo"])).fetchone() is not None
-    return {"atual": s["data_jogo"], "publicado": publicado, "posts": posts,
+    return {"atual": s["data_jogo"], "publicado": publicado, "posts": posts, "coletiva": coletiva(con, cid),
             "perfis": {"clube": {"nome": s["clube_nome"], "arroba": arroba_do_clube(s["clube_nome"]),
                                  "escudo": t[0] if t else None}, **PERFIS}}

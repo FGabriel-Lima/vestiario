@@ -19,10 +19,14 @@ Os dados vêm do save do jogo, sem cadastro manual. É só salvar no PES e clica
     mundo e campeões.
 - **Tem IA (Gemini), sempre presa aos dados do save:**
   - **Feed:** posts no estilo Instagram do perfil oficial do clube, da TNT Sports, do ge e de um perfil de mercado.
-    Quem publica o quê sai dos fatos do save; a IA só escreve as legendas. Os posts saem a cada sincronização.
+    Quem publica o quê sai dos fatos do save; a IA só escreve as legendas. Os posts saem a cada sincronização e
+    trazem também as grandes transferências do mundo.
+  - **Coletiva pós-jogo:** o repórter do ge pergunta sobre o último jogo, e as suas respostas viram post, citadas
+    como você escreveu.
   - **Parecer do auxiliar** sobre cada proposta recebida: aceitar, pedir mais ou recusar, com os números usados.
   - **Conversas:** com o auxiliar técnico e com cada jogador do elenco, que responde com base nos próprios números
-    (minutos, nota, contrato, propostas).
+    (minutos, nota, contrato, propostas). O que você promete fica guardado, e o jogador cobra com os números dos
+    jogos seguintes.
   - A IA não inventa número nem fato: recebe só o que está no banco, e o que falta vai dito como desconhecido.
 - **Usa os nomes e os escudos do seu patch.** Os nomes dos jogadores e os escudos dos times saem dos arquivos do patch instalado, na mesma ordem em que o jogo os carrega.
 
@@ -123,8 +127,6 @@ Vestiario.bat      abre o Vestiário com dois cliques
 
 ## Próximos passos
 
-- Promessas com memória nas conversas e coletiva de imprensa depois de cada jogo.
-- Grandes transferências do mundo no feed.
 - Títulos lidos do histórico do próprio jogo e o overall (CGJ) dos jogadores.
 
 ## Créditos

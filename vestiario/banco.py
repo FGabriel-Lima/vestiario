@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS mensagem(
 CREATE TABLE IF NOT EXISTS promessa(
   carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, ordem INTEGER NOT NULL,
   texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, PRIMARY KEY(carreira_id, player_id, ordem));
+-- coletiva depois do jogo do clube em 'data': perguntas da IA e respostas do treinador (NULL até ele responder)
+CREATE TABLE IF NOT EXISTS coletiva(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, data TEXT NOT NULL, perguntas TEXT NOT NULL, respostas TEXT,
+  legenda TEXT, em TEXT NOT NULL, PRIMARY KEY(carreira_id, data));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
