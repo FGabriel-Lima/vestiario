@@ -19,6 +19,12 @@ export const api = {
   mundo: (id, ano) => pedir(`/carreiras/${id}/mundo?ano=${ano}`),
   campeonatos: (id) => pedir(`/carreiras/${id}/campeonatos`),
   titulos: (id) => pedir(`/carreiras/${id}/titulos`),
+  parecer: (id, p) =>
+    pedir(`/carreiras/${id}/propostas/parecer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player_id: p.player_id, clube_idx: p.clube.idx, valor: p.valor_bruto }),
+    }),
   campeonato: (id, chave) => pedir(`/carreiras/${id}/campeonato?chave=${encodeURIComponent(chave)}`),
 };
 

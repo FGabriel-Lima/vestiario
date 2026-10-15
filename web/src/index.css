@@ -197,6 +197,17 @@ body {
   filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.5));
 }
 
+/* Bilhete do auxiliar: um pedaço de papel da súmula, preso no cartão com fita crepe */
+.bilhete {
+  position: relative;
+  padding: 1.5rem 1.25rem 1rem;
+  border-radius: 2px;
+  color: var(--color-pincel);
+  background: linear-gradient(170deg, var(--color-papel), color-mix(in srgb, var(--color-papel), #b9a77a 18%));
+  box-shadow: 0 12px 20px -12px rgb(0 0 0 / 0.8);
+  rotate: 0.4deg;
+}
+
 /* Súmula: folha de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
 .sumula {
   width: min(100% - 2rem, 46rem);

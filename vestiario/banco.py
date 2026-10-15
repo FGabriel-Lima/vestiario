@@ -1,4 +1,5 @@
 """SQLite do Vestiário: guarda a história que o save vai apagando."""
+import json
 import sqlite3
 from collections import Counter
 from datetime import date, datetime
@@ -34,6 +35,11 @@ CREATE TABLE IF NOT EXISTS contrato(
 CREATE TABLE IF NOT EXISTS proposta(
   carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, clube_idx INTEGER NOT NULL,
   valor INTEGER NOT NULL, primeira TEXT NOT NULL, ultima TEXT NOT NULL, PRIMARY KEY(carreira_id, player_id, clube_idx, valor));
+-- pareceres da IA sobre propostas, pela proposta; fatos = o JSON exato que a IA recebeu
+CREATE TABLE IF NOT EXISTS parecer(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, clube_idx INTEGER NOT NULL,
+  valor INTEGER NOT NULL, texto TEXT NOT NULL, recomendacao TEXT NOT NULL, fatos TEXT NOT NULL, em TEXT NOT NULL,
+  PRIMARY KEY(carreira_id, player_id, clube_idx, valor));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,
@@ -474,15 +480,85 @@ def propostas(con: sqlite3.Connection, cid: int) -> list[dict]:
     lista = []
     for r in con.execute(
             "SELECT p.player_id, coalesce(j.nome, 'Jogador #' || p.player_id) AS nome, j.posicao, p.valor, p.primeira,"
-            " p.ultima, t.nome AS clube, t.pes_id AS escudo FROM proposta p LEFT JOIN jogador j ON j.player_id = p.player_id"
-            " LEFT JOIN time t ON t.carreira_id = p.carreira_id AND t.idx = p.clube_idx WHERE p.carreira_id = ?"
+            " p.ultima, p.clube_idx, t.nome AS clube, t.pes_id AS escudo, pa.texto, pa.recomendacao, pa.fatos"
+            " FROM proposta p LEFT JOIN jogador j ON j.player_id = p.player_id"
+            " LEFT JOIN time t ON t.carreira_id = p.carreira_id AND t.idx = p.clube_idx"
+            " LEFT JOIN parecer pa ON pa.carreira_id = p.carreira_id AND pa.player_id = p.player_id"
+            " AND pa.clube_idx = p.clube_idx AND pa.valor = p.valor WHERE p.carreira_id = ?"
             " ORDER BY p.ultima DESC, p.valor DESC", (cid,)):
         situacao = "aberta" if r["ultima"] == s["data_jogo"] else "saiu" if r["player_id"] not in elenco else "encerrada"
         mercado = elenco.get(r["player_id"])
         lista.append({"player_id": r["player_id"], "nome": r["nome"], "posicao": r["posicao"], "valor": r["valor"] * MOEDA,
                       "valor_mercado": mercado * MOEDA if mercado else None, "primeira": r["primeira"],
-                      "ultima": r["ultima"], "situacao": situacao, "clube": {"nome": r["clube"], "escudo": r["escudo"]}})
+                      "ultima": r["ultima"], "situacao": situacao, "valor_bruto": r["valor"],
+                      "clube": {"idx": r["clube_idx"], "nome": r["clube"], "escudo": r["escudo"]},
+                      "parecer": {"parecer": r["texto"], "recomendacao": r["recomendacao"], "fatos": json.loads(r["fatos"])}
+                      if r["texto"] else None})
     return lista
+
+
+POSICOES = ["GO", "ZC", "LE", "LD", "VOL", "MLG", "MLE", "MLD", "MAT", "PTE", "PTD", "SA", "CA"]
+
+
+def fatos_da_proposta(con: sqlite3.Connection, cid: int, pid: int, clube_idx: int, valor: int) -> dict | None:
+    """Tudo o que a IA pode saber sobre uma proposta, só com o que existe no banco (dado ausente fica de fora).
+    valor em unidades do save, como na tabela proposta."""
+    if con.execute("SELECT 1 FROM proposta WHERE carreira_id = ? AND player_id = ? AND clube_idx = ? AND valor = ?",
+                   (cid, pid, clube_idx, valor)).fetchone() is None:
+        return None
+    s = _ultima(con, cid)
+    ano = s["data_jogo"][:4]
+    interessado = con.execute("SELECT nome FROM time WHERE carreira_id = ? AND idx = ?", (cid, clube_idx)).fetchone()
+    elenco = {r[0]: (r[1], r[2]) for r in con.execute(
+        "SELECT player_id, idade, valor FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
+    jog = con.execute("SELECT nome, posicao FROM jogador WHERE player_id = ?", (pid,)).fetchone()
+    posicao = jog["posicao"] if jog else None
+    jogador = {"nome": jog["nome"] if jog else f"Jogador #{pid}"}
+    idade, mercado = elenco.get(pid, (None, None))
+    if idade is not None:
+        jogador["idade"] = idade
+    if posicao is not None:
+        jogador["posicao"] = POSICOES[posicao]
+    if mercado:
+        jogador["valor_de_mercado"] = mercado * MOEDA
+    if c := _contratos(con, s["id"]).get(pid):
+        jogador["contrato"] = ({"emprestado_ate": c["fim"]} if c["emprestimo"] else
+                               {"salario_semanal": c["salario_semanal"], "multa_rescisoria": c["multa"], "fim": c["fim"]})
+    n = con.execute(_ESTATS + "AND substr(p.data, 1, 4) = :ano AND e.player_id = :pid GROUP BY e.player_id",
+                    {"cid": cid, "clube": s["clube_idx"], "ano": ano, "pid": pid}).fetchone()
+    jogador["temporada"] = {"jogos": n["jogos"] if n else 0, "gols": n["gols"] if n else 0,
+                            "assistencias": n["assistencias"] if n else 0,
+                            "jogos_do_clube": len([x for x in partidas(con, cid, int(ano)) if x["disputada"]])}
+    colegas = []
+    if posicao is not None:
+        for r in con.execute("SELECT j.nome, e.idade FROM elenco e JOIN jogador j USING(player_id) "
+                             "WHERE e.sincronizacao_id = ? AND j.posicao = ? AND e.player_id <> ? ORDER BY j.nome",
+                             (s["id"], posicao, pid)):
+            colegas.append({"nome": r["nome"], **({"idade": r["idade"]} if r["idade"] is not None else {})})
+    clube = {"nome": s["clube_nome"]}
+    if s["orcamento"] is not None:
+        clube["orcamento_de_transferencias"] = s["orcamento"] * MOEDA
+    clube["data_no_jogo"] = s["data_jogo"]
+    # o que falta vai explícito: sem isso, a IA "compara com o valor de mercado" mesmo sem o valor (aconteceu)
+    ausentes = [nome for chave, nome in (("valor_de_mercado", "valor de mercado do jogador"), ("idade", "idade"),
+                                         ("contrato", "contrato")) if chave not in jogador]
+    return {"proposta": {"clube_interessado": interessado[0] if interessado else None, "valor_oferecido": valor * MOEDA},
+            "jogador": jogador, "elenco_na_mesma_posicao": colegas, "clube": clube,
+            **({"dados_que_nao_temos": ausentes} if ausentes else {})}
+
+
+def parecer_guardado(con: sqlite3.Connection, cid: int, pid: int, clube_idx: int, valor: int) -> dict | None:
+    r = con.execute("SELECT texto, recomendacao, fatos FROM parecer WHERE carreira_id = ? AND player_id = ? "
+                    "AND clube_idx = ? AND valor = ?", (cid, pid, clube_idx, valor)).fetchone()
+    return {"parecer": r[0], "recomendacao": r[1], "fatos": json.loads(r[2])} if r else None
+
+
+def guardar_parecer(con: sqlite3.Connection, cid: int, pid: int, clube_idx: int, valor: int, p: dict) -> None:
+    with con:
+        con.execute("INSERT INTO parecer VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET texto = excluded.texto,"
+                    " recomendacao = excluded.recomendacao, fatos = excluded.fatos, em = excluded.em",
+                    (cid, pid, clube_idx, valor, p["parecer"], p["recomendacao"],
+                     json.dumps(p["fatos"], ensure_ascii=False), datetime.now().isoformat(timespec="seconds")))
 
 
 # ponytail: temporada = ano civil e todas as competições somadas; separar quando o campo de competição sair.

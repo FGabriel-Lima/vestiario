@@ -828,7 +828,7 @@ function Transferencias({ id }) {
   if (t.janelas.length === 0) {
     return (
       <>
-      <Propostas lista={t.propostas} />
+      <Propostas id={id} lista={t.propostas} />
       <p className="max-w-xl text-muted">
         Nenhuma mudança no elenco{t.primeira && ` desde ${dataBR(t.primeira)}`}. Depois da próxima janela de
         transferências no jogo, salve e sincronize: quem chegou e quem saiu aparece aqui, com clube e valor.
@@ -838,7 +838,7 @@ function Transferencias({ id }) {
   }
   return (
     <>
-      <Propostas lista={t.propostas} />
+      <Propostas id={id} lista={t.propostas} />
       <p className="mb-8 max-w-xl text-muted">
         O elenco de cada data do jogo sincronizada, comparado com o da data anterior. Os números são pelo clube, na
         carreira toda.
@@ -887,7 +887,7 @@ function Transferencias({ id }) {
 // versão, com o save já sobrescrito), a linha some.
 // Propostas de outros clubes pelos jogadores do clube. A régua compara a oferta com o valor de mercado, que é a
 // pergunta de quem decide: estão pagando mais ou menos do que ele vale?
-function Propostas({ lista }) {
+function Propostas({ id, lista }) {
   if (!lista?.length) return null;
   const abertas = lista.filter((p) => p.situacao === "aberta");
   const antigas = lista.filter((p) => p.situacao !== "aberta");
@@ -900,10 +900,10 @@ function Propostas({ lista }) {
         Ofertas de outros clubes pelos seus jogadores. Responda no PES; aqui fica o histórico.
       </p>
       {abertas.length > 0 ? (
-        <ul className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <ul className="grid grid-cols-1 items-start gap-5 md:grid-cols-2">
           {abertas.map((p) => (
             <li key={`${p.player_id}-${p.clube.nome}-${p.valor}`}>
-              <CartaDeProposta p={p} />
+              <CartaDeProposta id={id} p={p} />
             </li>
           ))}
         </ul>
@@ -932,7 +932,7 @@ function Propostas({ lista }) {
   );
 }
 
-function CartaDeProposta({ p }) {
+function CartaDeProposta({ id, p }) {
   const diferenca = p.valor_mercado ? (p.valor - p.valor_mercado) / p.valor_mercado : null;
   // régua: o traço de giz é o valor de mercado; a barra vai até a oferta (no máximo o dobro do valor)
   const escala = p.valor_mercado ? Math.max(p.valor, p.valor_mercado) * 1.15 : null;
@@ -980,8 +980,97 @@ function CartaDeProposta({ p }) {
         <span className="size-2 rounded-full bg-neon" aria-hidden="true" />
         Aberta · no save desde {dataBR(p.primeira)}
       </footer>
+      <ParecerDoAuxiliar id={id} p={p} />
     </article>
   );
+}
+
+const RECOMENDACAO = {
+  aceitar: ["Aceitar", "text-neon"],
+  negociar: ["Pedir mais", "text-gold"],
+  recusar: ["Recusar", "text-cartao"],
+};
+
+// Assinatura da IA: o parecer chega como um bilhete do auxiliar, papel preso com fita crepe e a decisão a pincel.
+// A IA só vê os fatos do banco, e o bilhete mostra quais foram ("Baseado em").
+function ParecerDoAuxiliar({ id, p }) {
+  const [parecer, setParecer] = useState(p.parecer);
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState(null);
+  const pedir = () => {
+    setCarregando(true);
+    setErro(null);
+    api
+      .parecer(id, p)
+      .then(setParecer)
+      .catch((e) => setErro(e.message))
+      .finally(() => setCarregando(false));
+  };
+  if (!parecer) {
+    return (
+      <div className="mt-4" aria-live="polite">
+        {carregando ? (
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <span aria-hidden="true" className="icone animate-pulse text-gold motion-reduce:animate-none">
+              edit_note
+            </span>
+            O auxiliar está olhando os números. Pode levar até meio minuto.
+          </p>
+        ) : (
+          <button
+            onClick={pedir}
+            className="flex items-center gap-2 rounded-md border border-pitch-700 px-3 py-2 font-kit text-base font-semibold uppercase tracking-wide hover:border-gold hover:text-gold"
+          >
+            <span aria-hidden="true" className="icone text-lg">
+              forum
+            </span>
+            Pedir opinião ao auxiliar
+          </button>
+        )}
+        {erro && <p className="mt-2 text-sm text-cartao">{erro}</p>}
+      </div>
+    );
+  }
+  const [rotulo, cor] = RECOMENDACAO[parecer.recomendacao] ?? [parecer.recomendacao, "text-chalk"];
+  return (
+    <div className="bilhete mt-6" aria-live="polite">
+      <span aria-hidden="true" className="fita absolute -top-3 left-6 text-sm" style={{ "--giro": "-3deg" }}>
+        Auxiliar
+      </span>
+      <p className="leading-relaxed">{parecer.parecer}</p>
+      <p className="mt-3 flex items-center gap-2 font-kit text-sm uppercase tracking-wide text-pincel/70">
+        Recomendação
+        <span className={`rounded-sm bg-pitch-950 px-2 py-0.5 font-pincel text-lg normal-case ${cor}`}>{rotulo}</span>
+      </p>
+      <details className="mt-3 text-sm text-pincel/80">
+        <summary className="cursor-pointer font-kit uppercase tracking-wide">Baseado em</summary>
+        <ul className="mt-2 list-inside list-disc space-y-0.5">
+          {baseDoParecer(parecer.fatos).map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+// Os fatos que a IA recebeu, em linhas legíveis
+function baseDoParecer(f) {
+  const j = f.jogador ?? {};
+  const t = j.temporada ?? {};
+  const c = j.contrato ?? {};
+  return [
+    `oferta de ${REAIS_EXATO.format(f.proposta.valor_oferecido)}`,
+    j.valor_de_mercado && `valor de mercado de ${REAIS_EXATO.format(j.valor_de_mercado)}`,
+    j.idade && `${j.idade} anos, ${j.posicao ?? ""}`.trim(),
+    c.fim && `contrato até ${dataBR(c.fim)}, salário de ${REAIS_EXATO.format(c.salario_semanal)}/sem.`,
+    c.emprestado_ate && `emprestado até ${dataBR(c.emprestado_ate)}`,
+    t.jogos_do_clube
+      ? `${plural(t.jogos ?? 0, "jogo", "jogos")} de ${t.jogos_do_clube} do clube na temporada, ${plural(t.gols ?? 0, "gol", "gols")}`
+      : "o clube ainda não jogou na temporada",
+    `${plural(f.elenco_na_mesma_posicao.length, "colega", "colegas")} na mesma posição`,
+    f.clube.orcamento_de_transferencias && `orçamento de ${REAIS_EXATO.format(f.clube.orcamento_de_transferencias)}`,
+  ].filter(Boolean);
 }
 
 function Movimento({ titulo, icone, cor, jogadores, clubeConhecido, saiu = false }) {

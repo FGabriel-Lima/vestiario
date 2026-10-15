@@ -8,7 +8,7 @@ from conftest import SAVES, atuacao, fazer_save, partida
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from vestiario import api, banco, leitor
+from vestiario import api, banco, ia, leitor
 
 
 @pytest.fixture
@@ -40,6 +40,24 @@ def test_telas(cliente):
     assert cliente.get("/api/carreiras/1/campeonatos").json() == []
     assert cliente.get("/api/carreiras/1/titulos").json() == []
     assert cliente.get("/api/carreiras/1/campeonato", params={"chave": "Nada|2026"}).status_code == 404
+
+
+def test_parecer_da_proposta(cliente, monkeypatch):
+    con = banco.conectar(api.DB)
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10,), propostas=[(1, 10, 8320)]), datetime(2026, 10, 15))
+    con.close()
+    monkeypatch.setattr(ia, "responder", lambda *a: {"parecer": "Recusa, professor.", "recomendacao": "recusar"})
+    url = "/api/carreiras/1/propostas/parecer"
+    assert cliente.post(url, json={"player_id": 10, "clube_idx": 1, "valor": 8320}).json()["recomendacao"] == "recusar"
+    assert cliente.post(url, json={"player_id": 10, "clube_idx": 1, "valor": 1}).status_code == 404
+
+    def sem_rede(*a):
+        raise ia.IAIndisponivel("Sem conexão com o Gemini.")
+
+    monkeypatch.setattr(ia, "responder", sem_rede)
+    banco.conectar(api.DB).execute("DELETE FROM parecer").connection.commit()
+    r = cliente.post(url, json={"player_id": 10, "clube_idx": 1, "valor": 8320})
+    assert r.status_code == 503 and "Gemini" in r.json()["detail"]
 
 
 def test_pasta_de_saves_inexistente(cliente):

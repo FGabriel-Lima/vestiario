@@ -4,11 +4,12 @@ from contextlib import closing
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import banco
+from . import auxiliar, banco, ia
 from .sincronizar import sincronizar
 
 _casa = Path.home()
@@ -149,6 +150,25 @@ def get_titulos(cid: int):
     with _con() as con:
         _carreira(con, cid)
         return banco.titulos(con, cid)
+
+
+class PedidoDeParecer(BaseModel):
+    player_id: int
+    clube_idx: int
+    valor: int  # unidades do save (valor_bruto da proposta)
+
+
+@app.post("/api/carreiras/{cid}/propostas/parecer")
+def post_parecer(cid: int, pedido: PedidoDeParecer):
+    with _con() as con:
+        _carreira(con, cid)
+        try:
+            p = auxiliar.parecer_da_proposta(con, cid, pedido.player_id, pedido.clube_idx, pedido.valor)
+        except ia.IAIndisponivel as e:
+            raise HTTPException(503, str(e))
+        if p is None:
+            raise HTTPException(404, "Proposta não encontrada")
+        return p
 
 
 @app.get("/api/carreiras/{cid}/lendas")
