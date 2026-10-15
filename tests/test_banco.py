@@ -582,3 +582,17 @@ def test_selecoes_e_movimentos_do_mundo(con):
     m = banco.movimentos_do_mundo(con, 1, minimo=0)
     assert [(x["player_id"], x["de"] and x["de"]["nome"], x["para"]["nome"], x["valor_de_mercado"]) for x in m] == [
         (20, "Clube B", "Clube C", 30000 * MOEDA)]
+
+
+def test_supercopa_e_reconhecida_pela_liga_dos_dois_times(con):
+    # o PES grava a supercopa com o id da supercopa seguinte da lista dele (a Community Shield vem como a espanhola),
+    # e às vezes como jogo de grupo de outra competição (a saudita veio como Sul-Americana, grupo A)
+    liga = lambda dia, m, v: partida(dia, m, v, (1, 0), [atuacao(50, 0)], comp=17, rodada=1)
+    banco.gravar(con, "ML00000000", fazer_save("2027-09-01", [
+        liga("2026-08-20", 1, 2), liga("2026-09-20", 2, 1), liga("2027-08-20", 1, 2),
+        partida("2026-08-10", 1, 2, (2, 1), [atuacao(50, 0)], comp=87, rodada=53),
+        partida("2027-08-10", 2, 1, (1, 0), [atuacao(60, 0)], comp=15, grupo=1),
+    ], competicoes={17: "Premier League", 86: "FA Community Shield", 87: "Supercopa de España", 15: "Sul-Americana"}), AGORA)
+    assert sorted((e["nome"], e["temporada"]) for e in banco.edicoes(con, 1)) == [
+        ("FA Community Shield", "2026"), ("FA Community Shield", "2027"), ("Premier League", "2026"), ("Premier League", "2027")]
+    assert banco.edicao(con, 1, "FA Community Shield|2027")["campeao"]["nome"] == "Clube C"

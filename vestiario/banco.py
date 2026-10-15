@@ -879,6 +879,7 @@ def _edicoes(con: sqlite3.Connection, cid: int) -> dict[str, dict]:
     por_id = {}
     for p in con.execute(_PARTIDA + "WHERE p.carreira_id = ? AND p.competicao IS NOT NULL ORDER BY p.data", (cid,)):
         por_id.setdefault(p["competicao_id"], []).append(dict(p))
+    _supercopas(por_id, {r[0]: r[1] for r in con.execute("SELECT id, nome FROM competicao WHERE carreira_id = ?", (cid,))})
     _devolve_avulsos(por_id)
     por_nome = {}
     for ps in por_id.values():
@@ -905,6 +906,51 @@ def _edicoes(con: sqlite3.Connection, cid: int) -> dict[str, dict]:
             e = edicoes.setdefault(f"{nome}|{temporada}", {"nome": nome, "temporada": temporada, "partes": []})
             e["partes"].extend(partes)
     return edicoes
+
+
+# Liga → supercopa do país (ids da tabela de competições do PES, os mesmos no FL26 e no Transfer Patch)
+# (a 2ª divisão leva à mesma supercopa: o Reims da Ligue 2 jogou o Trophée des Champions como finalista da copa)
+SUPERCOPA_DA_LIGA = {17: 86, 79: 86, 19: 87, 80: 87, 20: 88, 81: 88, 18: 89, 82: 89, 21: 90, 22: 91, 30: 92, 50: 95,
+                     52: 97, 115: 128, 155: 128, 116: 129, 118: 130, 120: 132, 162: 165, 168: 131, 169: 131}
+SUPERCOPAS = set(SUPERCOPA_DA_LIGA.values()) | {7}  # 7 = Supercopa da UEFA
+
+
+def _supercopas(por_id: dict[int, list[dict]], nomes: dict[int, str]) -> None:
+    """O PES grava a supercopa com o id da supercopa seguinte da lista dele (Liverpool x Crystal Palace veio como
+    Supercopa de España; Kashima x Machida, como Saudi Super Cup) e às vezes como jogo de grupo de outra competição
+    (Al Nassr x Al Hilal veio como Sul-Americana, grupo A). Conferido nos prints do PES (Fuji Xerox Super Cup:
+    Kashima e Machida). Então a supercopa sai da liga dos dois times: jogo num id de supercopa, ou jogo de grupo
+    sem outro jogo dos dois times ali, entre times de ligas da mesma supercopa, vira a final dela. Jogo num id de
+    supercopa entre times de ligas sem supercopa (Brøndby x Nordsjælland veio como Community Shield) sai da lista."""
+    # ponytail: uma Supercopa da UEFA entre dois times da mesma liga iria para a supercopa do país; nunca vista no save
+    # a liga de um time é a competição de pontos corridos em que ele mais jogou; contar só as ligas do mapa erra com
+    # jogo gravado no id errado (Independiente Rivadavia x Bahia, da Libertadores, veio como J1 League)
+    contagem = {}
+    for comp, ps in por_id.items():
+        for p in ps:
+            if p["rodada"] < MATA_MATA and not p["grupo"]:
+                for t in (p["mandante_idx"], p["visitante_idx"]):
+                    contagem.setdefault(t, Counter())[comp] += 1
+    liga = {t: c.most_common(1)[0][0] for t, c in contagem.items()}
+    for comp, ps in list(por_id.items()):
+        for m in list(ps):
+            alvos = {SUPERCOPA_DA_LIGA.get(liga.get(t)) for t in (m["mandante_idx"], m["visitante_idx"])}
+            alvo = alvos.pop() if len(alvos) == 1 else None
+            conhecidas = all(liga.get(t) is not None for t in (m["mandante_idx"], m["visitante_idx"]))
+            if alvo is None and not alvos and conhecidas and comp in SUPERCOPAS - {7}:
+                ps.remove(m)  # os dois times jogam ligas sem supercopa: o save errou o id e não dá para saber o certo
+                continue
+            if alvo is None or alvo == comp:
+                continue
+            times = {m["mandante_idx"], m["visitante_idx"]}
+            sozinho = not any(o is not m and times & {o["mandante_idx"], o["visitante_idx"]} for o in ps)
+            if comp in SUPERCOPAS or (m["grupo"] and sozinho):
+                ps.remove(m)
+                por_id.setdefault(alvo, []).append({**m, "competicao_id": alvo, "competicao": nomes.get(alvo), "grupo": 0,
+                                                    "rodada": 53})
+                por_id[alvo].sort(key=lambda q: q["data"])
+        if not ps:
+            del por_id[comp]
 
 
 def _devolve_avulsos(por_id: dict[int, list[dict]]) -> None:
