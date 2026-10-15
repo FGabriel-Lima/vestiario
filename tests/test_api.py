@@ -138,6 +138,8 @@ def test_so_o_pc_e_o_celular_no_tailscale_entram(cliente, monkeypatch):
     assert cliente.get("/api/carreiras", headers={"host": "192.168.0.12:8765"}).status_code == 400  # Wi-Fi compartilhado
     assert [api._ip_conhecido(ip) for ip in ("127.0.0.1", "::1", "100.88.1.2", "10.0.0.7", "192.168.0.12")] == [
         True, True, True, False, False]
+    monkeypatch.setenv("VESTIARIO_REDE_IPS", "10.148.134.11,10.148.134.225")  # PC e celular no roteador do celular
+    assert [api._ip_conhecido(ip) for ip in ("10.148.134.225", "10.148.134.11", "10.148.134.7")] == [True, True, False]
     assert cliente.get("/api/rede").json() == {"url": None}
     monkeypatch.setenv("VESTIARIO_REDE_URL", "http://100.101.102.103:8765")
     assert cliente.get("/api/rede").json() == {"url": "http://100.101.102.103:8765"}

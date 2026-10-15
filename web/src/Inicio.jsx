@@ -51,7 +51,7 @@ export default function Inicio({ onAbrir }) {
       {rede && (
         <p className="-mt-6 mb-8 flex flex-wrap items-center gap-x-2 text-sm text-muted">
           <span aria-hidden="true" className="icone text-base">smartphone</span>
-          No celular, com o Tailscale ligado:
+          No celular:
           <span className="select-all font-kit text-lg font-semibold tracking-wide text-chalk">{rede}</span>
         </p>
       )}

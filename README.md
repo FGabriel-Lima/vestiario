@@ -72,7 +72,11 @@ Para ver o Vestiário no celular enquanto o PES roda no PC, use o [Tailscale](ht
 (que usa `--rede`) também atende o celular, e a tela inicial no PC mostra o endereço (`http://100.x.x.x:8765`).
 Funciona em qualquer rede, até no 4G.
 
-O Vestiário só aceita o próprio PC e os aparelhos da sua conta Tailscale. Ele não abre para o resto do Wi-Fi: numa
+Sem Tailscale, também funciona com o PC conectado ao roteador do próprio celular: aí o celular é o gateway da rede
+e o Vestiário libera só ele. A tela inicial mostra o endereço (`http://<IP do PC>:8765`). Na primeira vez, o Windows
+pergunta se o Python pode receber conexões: permita.
+
+Fora isso, o Vestiário só aceita o próprio PC e os aparelhos da sua conta Tailscale. Ele não abre para o resto do Wi-Fi: numa
 rede compartilhada (como o eduroam), qualquer pessoa conseguiria abrir as suas carreiras e usar a sua chave do Gemini.
 
 ## Configuração
