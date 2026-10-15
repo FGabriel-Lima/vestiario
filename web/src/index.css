@@ -17,6 +17,7 @@
   --color-pos-def: #5bb8f5;
   --color-pos-meio: #6fd36f;
   --color-pos-ata: #ff6b7a;
+  --color-giz: rgb(238 245 238 / 0.28); /* traço de giz no quadro */
   --color-papel: #f6f0de; /* folha da súmula, mais clara que a fita para a fita aparecer por cima */
   /* Cores do clube da carreira aberta (Carreira.jsx troca estas quatro); sem cores, fica o padrão do vestiário */
   --color-destaque: var(--color-neon); /* cor do clube com contraste garantido sobre o gramado */
@@ -142,6 +143,42 @@ body {
   to {
     clip-path: inset(-1rem -2rem -1rem -2rem);
   }
+}
+
+/* Classificação: a linha do clube leva uma faixa nas duas cores do uniforme, como o cachecol do cabeçalho */
+.linha-do-clube {
+  background-color: color-mix(in srgb, var(--color-pitch-800), transparent 30%);
+}
+.linha-do-clube > td:first-child {
+  background: linear-gradient(to bottom, var(--time-1, var(--color-destaque)) 0 50%, var(--time-2, var(--color-destaque)) 50%)
+    no-repeat left / 5px 100%;
+}
+
+/* Chave do mata-mata riscada a giz: o colchete liga os dois confrontos do par ao da fase seguinte */
+.chave-par {
+  position: relative;
+}
+.chave-par::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: -1rem;
+  width: 1rem;
+  border: 2px solid var(--color-giz);
+  border-left: 0;
+  border-radius: 0 3px 3px 0;
+}
+.chave-entrada {
+  position: relative;
+}
+.chave-entrada::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -1rem;
+  width: 1rem;
+  border-top: 2px solid var(--color-giz);
 }
 
 /* Súmula: folha de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */

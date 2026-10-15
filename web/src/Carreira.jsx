@@ -3,9 +3,10 @@ import { api, dataBR } from "./api.js";
 import Escudo from "./Escudo.jsx";
 import Rosto from "./Rosto.jsx";
 
-const ABAS = ["Visão geral", "Elenco", "Partidas", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
+const ABAS = ["Visão geral", "Elenco", "Partidas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Pelo mundo"];
 // Abas que olham a carreira inteira e não usam o seletor de temporada
-const DA_CARREIRA = new Set(["Transferências", "Adversários", "Lendas"]);
+// (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
+const DA_CARREIRA = new Set(["Campeonatos", "Transferências", "Adversários", "Lendas"]);
 
 const GRAMADO = "#0b1a10"; // --color-pitch-950
 const canais = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -128,6 +129,7 @@ export default function Carreira({ id, onVoltar }) {
             )}
             {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} />}
             {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
+            {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} />}
             {aba === "Transferências" && <Transferencias id={id} />}
             {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
             {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
@@ -252,10 +254,11 @@ function Posicao({ codigo, className = "" }) {
   );
 }
 
-// [chave, rótulo, valor para ordenar, ordem crescente?, só a partir do sm (no celular vai para baixo do nome)]
+// [chave, rótulo, valor para ordenar, ordem crescente?, só a partir do sm (no celular, idade e contrato vão para baixo do nome)]
 const COLUNAS = [
   ["posicao", "Pos.", (l) => l.posicao ?? 99, true, true],
   ["nome", "Jogador", (l) => l.nome, true],
+  ["idade", "Idade", (l) => l.idade ?? 99, true, true],
   ["jogos", "Jogos", (l) => l.jogos],
   ["gols", "Gols", (l) => l.gols],
   ["assistencias", "Assist.", (l) => l.assistencias],
@@ -263,6 +266,8 @@ const COLUNAS = [
   ["multa", "Multa", (l) => l.contrato?.multa ?? -1, false, true],
   ["fim", "Contrato até", (l) => l.contrato?.fim ?? "9999", true, true],
 ];
+
+const CURTOS = { jogos: "J", gols: "G", assistencias: "A" };
 
 const comparar = (x, y) => (typeof x === "string" ? x.localeCompare(y, "pt-BR") : x - y);
 
@@ -282,17 +287,25 @@ function Elenco({ id, ano, dataJogo }) {
   return (
     <table className="w-full text-left">
       <thead>
-        <tr className="border-b border-pitch-700 font-kit text-lg uppercase tracking-wide text-muted">
+        <tr className="border-b border-pitch-700 font-kit text-base uppercase tracking-wide text-muted sm:text-lg">
           {COLUNAS.map(([k, rotulo, , cresc, contrato]) => (
             <th
               key={k}
               aria-sort={ordem === k ? (cresc ? "ascending" : "descending") : "none"}
               className={`py-2 font-semibold ${
-                k === "nome" ? "" : k === "posicao" ? "hidden w-14 sm:table-cell" : contrato ? "hidden w-32 text-right sm:table-cell" : "w-12 text-right sm:w-20"
+                k === "nome" ? "" : k === "posicao" ? "hidden w-14 sm:table-cell" : k === "idade" ? "hidden w-16 text-right sm:table-cell" : contrato ? "hidden w-32 text-right sm:table-cell" : "w-9 text-right sm:w-20"
               }`}
             >
-              <button onClick={() => setOrdem(k)} className={ordem === k ? "text-destaque" : "hover:text-chalk"}>
-                {rotulo}
+              <button onClick={() => setOrdem(k)} aria-label={rotulo} className={ordem === k ? "text-destaque" : "hover:text-chalk"}>
+                {/* no celular as colunas de números são estreitas: J, G e A */}
+                {CURTOS[k] ? (
+                  <>
+                    <span className="sm:hidden">{CURTOS[k]}</span>
+                    <span className="hidden sm:inline">{rotulo}</span>
+                  </>
+                ) : (
+                  rotulo
+                )}
               </button>
             </th>
           ))}
@@ -316,11 +329,13 @@ function Elenco({ id, ano, dataJogo }) {
                     </span>
                     <span className={`flex items-center gap-2 text-sm sm:hidden ${vencendo(c) ? "text-gold" : "text-muted"}`}>
                       <Posicao codigo={l.posicao} className="w-9 py-0 text-xs" />
-                      {c && `até ${dataBR(c.fim)} · ${REAIS.format(c.salario_semanal)}/sem.`}
+                      {/* no celular só idade e mês/ano do fim do contrato; salário e multa ficam nas colunas do desktop */}
+                      {[l.idade && `${l.idade} anos`, c && `até ${dataBR(c.fim).slice(3)}`].filter(Boolean).join(" · ")}
                     </span>
                   </span>
                 </div>
               </td>
+              <td className="hidden text-right font-kit text-xl sm:table-cell">{l.idade}</td>
               <td className="text-right font-kit text-xl">{l.jogos}</td>
               <td className="text-right font-kit text-xl">{l.gols}</td>
               <td className="text-right font-kit text-xl">{l.assistencias}</td>
@@ -380,11 +395,14 @@ function ListaPartidas({ id, partidas, clube }) {
             <li key={p.id}>
               <Linha
                 {...(p.disputada && { onClick: () => setAberta(p.id), "aria-haspopup": "dialog" })}
-                className={`grid w-full grid-cols-[4.5rem_1fr_auto_1fr] items-center gap-3 border-l-4 py-2.5 pl-3 text-left sm:grid-cols-[6rem_1fr_auto_1fr] ${
-                  p.disputada ? `${BORDA_RESULTADO[resultado(p, clube)]} hover:bg-pitch-900` : "border-transparent"
+                className={`grid w-full grid-cols-[1fr_auto_1fr] items-center gap-x-3 gap-y-1 border-l-4 py-2.5 pl-3 text-left sm:grid-cols-[6rem_1fr_auto_1fr] ${
+                  p.disputada
+                    ? `${clube === p.mandante_idx || clube === p.visitante_idx ? BORDA_RESULTADO[resultado(p, clube)] : "border-pitch-700"} hover:bg-pitch-900`
+                    : "border-transparent"
                 }`}
               >
-                <span className="text-sm text-muted">{dataBR(p.data)}</span>
+                {/* no celular a data fica numa linha própria, para os nomes dos times caberem */}
+                <span className="col-span-3 text-xs text-muted sm:col-span-1 sm:text-sm">{dataBR(p.data)}</span>
                 <span className={`flex min-w-0 items-center justify-end gap-2 ${p.mandante_idx === clube ? "font-semibold" : "text-muted"}`}>
                   <span className="truncate">{p.mandante}</span>
                   <Escudo id={p.mandante_escudo} nome={p.mandante} />
@@ -506,6 +524,243 @@ function Folha({ p }) {
         )}
       </div>
     </>
+  );
+}
+
+function Campeonatos({ id, clube }) {
+  const { dados: edicoes, erro } = useDados(() => api.campeonatos(id), [id]);
+  const [chave, setChave] = useState(null);
+  if (erro) return <Erro mensagem={erro} />;
+  if (!edicoes) return null;
+  if (edicoes.length === 0) {
+    return <p className="max-w-xl text-muted">Nenhuma competição registrada ainda. Salve a Master League no PES e sincronize.</p>;
+  }
+  const atual = chave ?? edicoes[0].chave;
+  const grupos = [
+    ["Seu clube", edicoes.filter((e) => e.do_clube)],
+    ["Outras competições", edicoes.filter((e) => !e.do_clube)],
+  ];
+  return (
+    <>
+      <label className="mb-8 flex max-w-md flex-col gap-1">
+        <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Competição</span>
+        <select
+          value={atual}
+          onChange={(e) => setChave(e.target.value)}
+          className="rounded-md border border-pitch-700 bg-pitch-800 px-3 py-2 font-kit text-lg uppercase"
+        >
+          {grupos.map(([rotulo, lista]) =>
+            lista.length > 0 && (
+              <optgroup key={rotulo} label={rotulo}>
+                {lista.map((e) => (
+                  <option key={e.chave} value={e.chave}>
+                    {e.nome} {e.temporada}
+                  </option>
+                ))}
+              </optgroup>
+            ),
+          )}
+        </select>
+      </label>
+      <Edicao key={atual} id={id} chave={atual} clube={clube} />
+    </>
+  );
+}
+
+function Edicao({ id, chave, clube }) {
+  const { dados: e, erro } = useDados(() => api.campeonato(id, chave), [id, chave]);
+  if (erro) return <Erro mensagem={erro} />;
+  if (!e) return null;
+  const temTabela = e.fases.some((f) => f.tipo === "tabela");
+  return (
+    <>
+      <header className="mb-8 flex flex-wrap items-end gap-x-5 gap-y-2">
+        <h2 className="font-kit text-4xl font-extrabold uppercase leading-none sm:text-5xl">{e.nome}</h2>
+        <span className="fita text-xl">{e.temporada}</span>
+      </header>
+
+      {e.fases.map((f, i) =>
+        f.tipo === "jogos" && f.titulo !== "Fase preliminar" && e.chaveamento.length > 0 ? null : f.tipo === "tabela" ? (
+          <section key={i} className="mb-12">
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <h3 className="font-kit text-2xl font-semibold uppercase">{f.titulo}</h3>
+              <p className="text-sm text-muted">
+                {f.rodadas_jogadas} de {plural(f.rodadas_total, "rodada", "rodadas")} jogadas
+              </p>
+            </div>
+            <div className={f.grupos.length > 1 ? "grid grid-cols-1 gap-x-8 gap-y-10 lg:grid-cols-2" : ""}>
+              {f.grupos.map((g, k) => (
+                <Classificacao key={k} titulo={g.titulo} linhas={g.linhas} clube={clube} compacta={f.grupos.length > 1} />
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              Ordem: pontos, vitórias, saldo de gols, gols pró e confronto direto. Empatados em tudo dividem a posição.
+            </p>
+          </section>
+        ) : (
+          <section key={i} className="mb-10">
+            <h3 className="mb-3 flex items-baseline gap-3 font-kit text-2xl font-semibold uppercase">
+              {f.titulo}
+              <span className="text-base font-normal text-muted">{plural(f.partidas.length, "jogo", "jogos")}</span>
+            </h3>
+            <ListaPartidas id={id} partidas={f.partidas} clube={clube} />
+          </section>
+        ),
+      )}
+
+      {e.chaveamento.length > 0 && <Chaveamento id={id} colunas={e.chaveamento} clube={clube} />}
+
+      {temTabela && e.partidas_clube.length > 0 && (
+        <section>
+          <h3 className="mb-3 font-kit text-2xl font-semibold uppercase">Seus jogos</h3>
+          <ListaPartidas id={id} partidas={e.partidas_clube} clube={clube} />
+        </section>
+      )}
+    </>
+  );
+}
+
+// Assinatura do mata-mata: a chave riscada a giz. As linhas só aparecem quando os times da fase seguinte vêm mesmo
+// do par (o banco confere); com dado faltando ou trocado no save, os cards ficam soltos para não ligar times errados.
+function Chaveamento({ id, colunas, clube }) {
+  const [aberta, setAberta] = useState(null);
+  const liga = (i) => colunas[i].encaixa;
+  return (
+    <section className="mb-12" aria-label="Chaveamento">
+      <h3 className="mb-4 font-kit text-2xl font-semibold uppercase">Mata-mata</h3>
+      <div className="relative -mx-4 overflow-x-auto px-4 pb-4 sm:mx-0 sm:px-0">
+        {/* colunas flexíveis: no desktop a chave inteira cabe; só rola de lado quando falta espaço */}
+        <div className="grid auto-cols-[minmax(11rem,1fr)] grid-flow-col gap-8" style={{ maxWidth: `${colunas.length * 18}rem` }}>
+          {colunas.map((col, i) => {
+            const pares = liga(i)
+              ? col.confrontos.filter((_, k) => k % 2 === 0).map((c, k) => [c, col.confrontos[2 * k + 1]])
+              : col.confrontos.map((c) => [c]);
+            const recebe = i > 0 && liga(i - 1);
+            return (
+              <div key={col.titulo} className="flex min-w-0 flex-col">
+                <h4 className="mb-3 font-kit text-lg font-semibold uppercase text-muted">
+                  {col.titulo} <span className="font-normal">· {col.confrontos.length}</span>
+                </h4>
+                <div className="flex flex-1 flex-col justify-around gap-4">
+                  {pares.map((par, k) => (
+                    <div key={k} className={`flex flex-1 flex-col justify-around gap-4 ${par.length === 2 ? "chave-par" : ""}`}>
+                      {par.map((c, j) => (
+                        <Confronto key={j} c={c} clube={clube} recebe={recebe} onAbrir={setAberta} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {aberta !== null && <Sumula id={id} pid={aberta} onFechar={() => setAberta(null)} />}
+    </section>
+  );
+}
+
+function Confronto({ c, clube, recebe, onAbrir }) {
+  const decidido = c.times.some((t) => t.vencedor);
+  return (
+    <div className={`rounded-md bg-pitch-900 ${recebe ? "chave-entrada" : ""}`}>
+      <ul className="px-3 pt-2.5">
+        {c.times.map((t) => (
+          <li
+            key={t.idx}
+            className={`flex items-center gap-2 py-0.5 ${decidido && !t.vencedor ? "text-muted" : ""} ${t.vencedor ? "font-semibold" : ""}`}
+          >
+            <Escudo id={t.escudo} nome={t.nome ?? "?"} className={`size-5 ${decidido && !t.vencedor ? "opacity-50" : ""}`} />
+            <span className={`min-w-0 flex-1 truncate ${t.idx === clube ? "text-destaque" : ""}`}>{t.nome}</span>
+            {t.vencedor && <span className="sr-only">(passou)</span>}
+            <span className="font-kit text-xl font-bold">{t.gols ?? "–"}</span>
+            {t.penaltis !== null && <span className="w-6 font-kit text-sm text-muted">({t.penaltis})</span>}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-1.5 flex gap-1 border-t border-pitch-800 px-2 py-1.5">
+        {c.jogos.map((j, k) => {
+          const rotulo = c.jogos.length === 1 ? "Jogo único" : k === 0 ? "Ida" : "Volta";
+          return j.disputada ? (
+            <button
+              key={j.id}
+              onClick={() => onAbrir(j.id)}
+              aria-haspopup="dialog"
+              className="rounded-sm px-2 py-0.5 font-kit text-sm uppercase tracking-wide text-muted hover:bg-pitch-800 hover:text-chalk"
+            >
+              {rotulo} {j.placar.replace("-", "–")}
+            </button>
+          ) : (
+            <span key={j.id} className="px-2 py-0.5 font-kit text-sm uppercase tracking-wide text-muted/70">
+              {rotulo} {dataBR(j.data).slice(0, 5)}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Colunas que somem no celular (e nas tabelas de grupo, que dividem a largura)
+const DETALHE = "hidden sm:table-cell";
+
+function Classificacao({ titulo, linhas, clube, compacta }) {
+  const detalhe = compacta ? "hidden" : DETALHE;
+  const colunas = [
+    ["J", "Jogos", ""],
+    ["V", "Vitórias", detalhe],
+    ["E", "Empates", detalhe],
+    ["D", "Derrotas", detalhe],
+    ["GP", "Gols pró", detalhe],
+    ["GC", "Gols contra", detalhe],
+    ["SG", "Saldo de gols", ""],
+  ];
+  return (
+    <table className="w-full text-left">
+      {titulo && <caption className="mb-2 text-left font-kit text-xl font-semibold uppercase text-muted">{titulo}</caption>}
+      <thead>
+        <tr className="border-b border-pitch-700 font-kit text-base uppercase tracking-wide text-muted">
+          <th className="w-8 py-2 text-right font-semibold">
+            <abbr title="Posição" className="no-underline">#</abbr>
+          </th>
+          <th className="py-2 pl-3 font-semibold">Time</th>
+          <th className="w-12 text-right font-semibold">
+            <abbr title="Pontos" className="no-underline">P</abbr>
+          </th>
+          {colunas.map(([sigla, nome, classe]) => (
+            <th key={sigla} className={`w-10 text-right font-semibold ${classe}`}>
+              <abbr title={nome} className="no-underline">{sigla}</abbr>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {linhas.map((l) => {
+          const nosso = l.idx === clube;
+          const saldo = l.gols_pro - l.gols_contra;
+          return (
+            <tr key={l.idx} aria-current={nosso ? "true" : undefined} className={`border-b border-pitch-800 ${nosso ? "linha-do-clube" : ""}`}>
+              <td className="py-2 text-right font-kit text-lg text-muted">{l.posicao}</td>
+              <td className="py-2 pl-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <Escudo id={l.escudo} nome={l.nome ?? "?"} />
+                  <span className={`truncate ${nosso ? "font-semibold text-destaque" : ""}`}>{l.nome}</span>
+                </span>
+              </td>
+              <td className="text-right font-kit text-2xl font-bold">{l.pontos}</td>
+              {[l.jogos, l.vitorias, l.empates, l.derrotas, l.gols_pro, l.gols_contra].map((v, k) => (
+                <td key={k} className={`text-right font-kit text-lg ${colunas[k][2]}`}>
+                  {v}
+                </td>
+              ))}
+              <td className={`text-right font-kit text-lg ${saldo > 0 ? "text-neon" : saldo < 0 ? "text-cartao" : "text-muted"}`}>
+                {saldo > 0 ? `+${saldo}` : saldo}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 

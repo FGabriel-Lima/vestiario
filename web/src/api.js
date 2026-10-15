@@ -17,6 +17,8 @@ export const api = {
   confrontos: (id) => pedir(`/carreiras/${id}/confrontos`),
   transferencias: (id) => pedir(`/carreiras/${id}/transferencias`),
   mundo: (id, ano) => pedir(`/carreiras/${id}/mundo?ano=${ano}`),
+  campeonatos: (id) => pedir(`/carreiras/${id}/campeonatos`),
+  campeonato: (id, chave) => pedir(`/carreiras/${id}/campeonato?chave=${encodeURIComponent(chave)}`),
 };
 
 export const dataBR = (iso) => iso.slice(0, 10).split("-").reverse().join("/");

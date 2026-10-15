@@ -1,11 +1,12 @@
 import struct
+import zlib
 from datetime import date
 
 import pytest
 
 from vestiario.leitor import (ELENCO, LIVRO0, LIVRO_N, LIVRO_TAM, MOEDA, PARTIDA0, PARTIDA_TAM, PARTIDAS, TIME_ID,
-                              TIME_TAM, VAZIO, FormatoInvalido, ler_contratos, ler_descricao, ler_elenco, ler_ids,
-                              ler_negocios, ler_partidas)
+                              TIME_TAM, VAZIO, BLOCO0, COMPETICAO_TAM, COMPETICOES0, FormatoInvalido, ler_competicoes,
+                              ler_contratos, ler_descricao, ler_elenco, ler_idades, ler_ids, ler_negocios, ler_partidas)
 
 
 def tabela_vazia() -> bytearray:
@@ -15,7 +16,7 @@ def tabela_vazia() -> bytearray:
     return data
 
 
-def escrever_partida(data, i, ano, mes, dia, mandante, visitante, placar=b"\0" * 6, vagas=()):
+def escrever_partida(data, i, ano, mes, dia, mandante, visitante, placar=b"\0" * 6, vagas=(), competicao=0, rodada=0):
     h = PARTIDA0 + i * PARTIDA_TAM
     data[h:h + PARTIDA_TAM] = bytes(PARTIDA_TAM)
     struct.pack_into("<HBB", data, h, ano, mes, dia)
@@ -26,6 +27,7 @@ def escrever_partida(data, i, ano, mes, dia, mandante, visitante, placar=b"\0" *
         struct.pack_into("<I", data, h + 28 + s * 16, 0xFFFF)
     for s, pid, gols, assist in vagas:
         struct.pack_into("<IIII", data, h + 28 + s * 16, 1, pid, gols | assist << 8, 0)
+    struct.pack_into("<HH", data, h + 592, competicao, rodada)
 
 
 def test_descricao():
@@ -41,7 +43,7 @@ def test_partidas_sinteticas():
     # 2 x 1 com gol de prorrogação do mandante; vagas 0..16 = mandante, 17..33 = visitante
     escrever_partida(data, 0, 2026, 1, 22, 1, 2, bytes([1, 1, 0, 1, 0, 0]),
                      [(0, 0x80000000 | 500, 2, 0), (17, 600, 1, 0), (18, 601, 0, 1)])
-    escrever_partida(data, 5, 2026, 2, 4, 2, 1)                 # futura
+    escrever_partida(data, 5, 2026, 2, 4, 2, 1, competicao=12 << 8 | 9, rodada=0x6000 | 3)  # futura, grupo C
     escrever_partida(data, 9, 2026, 3, 1, 1, 0x3FFF)            # adversário indefinido: ignorada
     ps = ler_partidas(bytes(data), n_times=3)
     assert len(ps) == 2
@@ -50,6 +52,17 @@ def test_partidas_sinteticas():
     assert [(a.player_id, a.lado, a.gols, a.assistencias) for a in p.escalacao] == [
         (500, 0, 2, 0), (600, 1, 1, 0), (601, 1, 0, 1)]
     assert ps[1].disputada is False
+    assert (ps[1].competicao, ps[1].grupo, ps[1].rodada) == (9, 3, 3)
+
+
+def test_tabela_de_competicoes():
+    data = bytearray(COMPETICOES0 + 4 * COMPETICAO_TAM)
+    for k, (cid, nome) in enumerate(((1, "FIFA Club World Cup"), (29, "Brasileirão Série A"), (31, "Copa do Brasil"))):
+        struct.pack_into("<H", data, COMPETICOES0 + k * COMPETICAO_TAM, cid)
+        o = COMPETICOES0 + k * COMPETICAO_TAM + 2
+        data[o:o + len(nome.encode())] = nome.encode()
+    assert ler_competicoes(bytes(data)) == {1: "FIFA Club World Cup", 29: "Brasileirão Série A", 31: "Copa do Brasil"}
+    assert ler_competicoes(bytes(COMPETICOES0 + 10)) == {}
 
 
 def test_data_invalida_recusa_o_save():
@@ -95,6 +108,13 @@ def test_ids_pes_dos_times():
     struct.pack_into("<I", data, 2 * TIME_TAM + TIME_ID, 9 << 14 | 7)
     with pytest.raises(FormatoInvalido, match="time 2"):
         ler_ids(bytes(data), 3)
+
+
+def test_save_real_competicoes(save_atual):
+    assert save_atual.competicoes[29] == "Brasileirão Série A" and save_atual.competicoes[31] == "Copa do Brasil"
+    serie_a = [p for p in save_atual.partidas if p.competicao == 29 and p.data.year == 2026]
+    assert len({t for p in serie_a for t in (p.mandante, p.visitante)}) == 20
+    assert {p.rodada for p in serie_a} == set(range(38))
 
 
 def test_save_real_ids_pes(save_atual):
@@ -171,3 +191,27 @@ def test_save_real_contratos(save_atual):
 
 def test_save_real_orcamento(save_atual):
     assert save_atual.orcamento * MOEDA == 443_590_580  # "Orçam. transf." na tela do PES em 31/01/2026
+
+
+def bloco_compactado(registros: list[tuple[int, int]]) -> bytes:
+    """Bloco como o do save: registros de 156 bytes (idade em +18, bits 2..7; player_id em +36), em pedaços zlib."""
+    raw = bytearray(156 * len(registros))
+    for k, (pid, idade) in enumerate(registros):
+        raw[k * 156 + 18] = idade << 2 | 0b01
+        struct.pack_into("<I", raw, k * 156 + 36, pid)
+    pedacos = b""
+    for i in range(0, len(raw), 200):
+        z = zlib.compress(bytes(raw[i:i + 200]))
+        pedacos += struct.pack(">III", len(raw[i:i + 200]), len(z), 0) + z
+    return bytes.fromhex("20110912") + bytes(4) + struct.pack(">II", len(raw), len(pedacos)) + pedacos
+
+
+def test_idades_do_bloco_compactado():
+    data = bytes(BLOCO0) + bloco_compactado([(60657, 33), (0x40000000 | 65134, 35), (0, 0)])
+    assert ler_idades(data) == {60657: 33, 65134: 35}
+    assert ler_idades(bytes(BLOCO0 + 100)) == {}  # sem a assinatura: sem idades, sem quebrar
+
+
+def test_save_real_idades(save_atual):
+    # telas do PES em 31/01/2026: Calleri 33, Artur 28, Arboleda 35
+    assert {p: save_atual.idades[p] for p in (60657, 113479, 65134)} == {60657: 33, 113479: 28, 65134: 35}
