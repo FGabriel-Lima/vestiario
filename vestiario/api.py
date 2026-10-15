@@ -1,13 +1,13 @@
-"""API HTTP do Vestiário. Só escuta em 127.0.0.1 (veja __main__.py)."""
+"""API HTTP do Vestiário. Escuta em 127.0.0.1, ou também no Tailscale com --rede (veja __main__.py)."""
+import ipaddress
 import os
 from contextlib import closing
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import auxiliar, banco, conversas, feed, ia
 from .sincronizar import sincronizar
@@ -19,7 +19,35 @@ DB = Path(os.environ.get("VESTIARIO_DB", Path(os.environ.get("LOCALAPPDATA", _ca
 WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 app = FastAPI(title="Vestiário")
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])  # testserver = TestClient
+
+
+TAILSCALE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _ip_conhecido(texto: str) -> bool:
+    """O próprio PC ou um aparelho da conta Tailscale do usuário (o celular). A rede Wi-Fi não entra: numa rede
+    compartilhada (o eduroam), qualquer um abriria o Vestiário e gastaria a chave do Gemini."""
+    try:
+        ip = ipaddress.ip_address(texto.strip("[]"))
+    except ValueError:
+        return False
+    return ip.is_loopback or ip in TAILSCALE
+
+
+@app.middleware("http")
+async def so_aparelhos_do_usuario(request, seguir):
+    # Host por nome, só localhost: barra o DNS rebinding (uma página da internet chamando a API pelo navegador)
+    host = request.headers.get("host", "").rsplit(":", 1)[0]
+    cliente = request.client.host if request.client else ""
+    if not ((host in ("localhost", "testserver") or _ip_conhecido(host)) and (cliente == "testclient" or _ip_conhecido(cliente))):
+        return PlainTextResponse("Invalid host header", status_code=400)
+    return await seguir(request)
+
+
+@app.get("/api/rede")
+def get_rede():
+    """Endereço para abrir no celular, quando o servidor foi aberto com --rede."""
+    return {"url": os.environ.get("VESTIARIO_REDE_URL")}
 
 
 def _con():

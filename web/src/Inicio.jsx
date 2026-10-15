@@ -7,10 +7,13 @@ export default function Inicio({ onAbrir }) {
   const [sincronizando, setSincronizando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [erro, setErro] = useState(null);
+  const [rede, setRede] = useState(null);
 
   const carregar = () => api.carreiras().then(setCarreiras).catch((e) => setErro(e.message));
   useEffect(() => {
     carregar();
+    // no PC, mostra o endereço para abrir no celular; no celular ele já está aberto
+    if (["127.0.0.1", "localhost"].includes(location.hostname)) api.rede().then((r) => setRede(r.url)).catch(() => {});
   }, []);
 
   async function sincronizar() {
@@ -45,6 +48,13 @@ export default function Inicio({ onAbrir }) {
         </button>
       </header>
 
+      {rede && (
+        <p className="-mt-6 mb-8 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+          <span aria-hidden="true" className="icone text-base">smartphone</span>
+          No celular, com o Tailscale ligado:
+          <span className="select-all font-kit text-lg font-semibold tracking-wide text-chalk">{rede}</span>
+        </p>
+      )}
       {erro && <p className="mb-6 rounded-md border-l-4 border-cartao bg-pitch-900 p-4">{erro}</p>}
       {resultado && <ResultadoSync resultado={resultado} />}
 

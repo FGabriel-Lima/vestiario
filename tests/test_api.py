@@ -130,6 +130,17 @@ def test_erro_ao_gravar_pula_so_aquele_arquivo(cliente, monkeypatch):
 
 def test_host_estranho_e_recusado(cliente):
     assert cliente.get("/api/carreiras", headers={"host": "evil.example"}).status_code == 400
+    assert cliente.get("/api/carreiras", headers={"host": "8.8.8.8:8765"}).status_code == 400
+
+
+def test_so_o_pc_e_o_celular_no_tailscale_entram(cliente, monkeypatch):
+    assert cliente.get("/api/carreiras", headers={"host": "100.101.102.103:8765"}).status_code == 200
+    assert cliente.get("/api/carreiras", headers={"host": "192.168.0.12:8765"}).status_code == 400  # Wi-Fi compartilhado
+    assert [api._ip_conhecido(ip) for ip in ("127.0.0.1", "::1", "100.88.1.2", "10.0.0.7", "192.168.0.12")] == [
+        True, True, True, False, False]
+    assert cliente.get("/api/rede").json() == {"url": None}
+    monkeypatch.setenv("VESTIARIO_REDE_URL", "http://100.101.102.103:8765")
+    assert cliente.get("/api/rede").json() == {"url": "http://100.101.102.103:8765"}
 
 
 def test_escudo(cliente):

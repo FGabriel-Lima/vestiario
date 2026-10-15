@@ -65,6 +65,16 @@ Clique em **Sincronizar** e escolha uma carreira.
 
 Depois de jogar, salve a Master League no PES e clique em **Sincronizar** de novo. Só os saves que mudaram são lidos outra vez (uns 7 segundos por save).
 
+### No celular
+
+Para ver o Vestiário no celular enquanto o PES roda no PC, use o [Tailscale](https://tailscale.com/download)
+(gratuito): instale no PC e no celular e entre com a mesma conta nos dois. Com ele ligado, o `Vestiario.bat`
+(que usa `--rede`) também atende o celular, e a tela inicial no PC mostra o endereço (`http://100.x.x.x:8765`).
+Funciona em qualquer rede, até no 4G.
+
+O Vestiário só aceita o próprio PC e os aparelhos da sua conta Tailscale. Ele não abre para o resto do Wi-Fi: numa
+rede compartilhada (como o eduroam), qualquer pessoa conseguiria abrir as suas carreiras e usar a sua chave do Gemini.
+
 ## Configuração
 
 Os caminhos padrão funcionam numa instalação comum. Para trocar algum, defina a variável de ambiente antes de iniciar:

@@ -7,6 +7,7 @@ async function pedir(caminho, opcoes) {
 
 export const api = {
   carreiras: () => pedir("/carreiras"),
+  rede: () => pedir("/rede"),
   sincronizar: () => pedir("/sincronizar", { method: "POST" }),
   carreira: (id) => pedir(`/carreiras/${id}`),
   resumo: (id, ano) => pedir(`/carreiras/${id}/resumo?ano=${ano}`),
