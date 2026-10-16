@@ -4,6 +4,7 @@ import os
 from contextlib import closing
 from pathlib import Path
 
+import segno
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -49,8 +50,9 @@ async def so_aparelhos_do_usuario(request, seguir):
 
 @app.get("/api/rede")
 def get_rede():
-    """Endereço para abrir no celular, quando o servidor foi aberto com --rede."""
-    return {"url": os.environ.get("VESTIARIO_REDE_URL")}
+    """Endereço para abrir no celular, quando o servidor foi aberto com --rede, e o QR code dele (data URI)."""
+    url = os.environ.get("VESTIARIO_REDE_URL")
+    return {"url": url, "qr": url and segno.make(url, error="m").svg_data_uri(scale=4, border=2)}
 
 
 def _con():

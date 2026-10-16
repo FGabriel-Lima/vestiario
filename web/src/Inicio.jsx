@@ -13,7 +13,7 @@ export default function Inicio({ onAbrir }) {
   useEffect(() => {
     carregar();
     // no PC, mostra o endereço para abrir no celular; no celular ele já está aberto
-    if (["127.0.0.1", "localhost"].includes(location.hostname)) api.rede().then((r) => setRede(r.url)).catch(() => {});
+    if (["127.0.0.1", "localhost"].includes(location.hostname)) api.rede().then((r) => r.url && setRede(r)).catch(() => {});
   }, []);
 
   async function sincronizar() {
@@ -49,11 +49,14 @@ export default function Inicio({ onAbrir }) {
       </header>
 
       {rede && (
-        <p className="-mt-6 mb-8 flex flex-wrap items-center gap-x-2 text-sm text-muted">
-          <span aria-hidden="true" className="icone text-base">smartphone</span>
-          No celular:
-          <span className="select-all font-kit text-lg font-semibold tracking-wide text-chalk">{rede}</span>
-        </p>
+        <div className="-mt-6 mb-8 flex flex-wrap items-center gap-4 text-sm text-muted">
+          <img src={rede.qr} alt={`QR code de ${rede.url}`} className="size-28 rounded-md bg-white" />
+          <p className="flex flex-wrap items-center gap-x-2">
+            <span aria-hidden="true" className="icone text-base">smartphone</span>
+            No celular, leia o QR code ou abra:
+            <span className="select-all font-kit text-lg font-semibold tracking-wide text-chalk">{rede.url}</span>
+          </p>
+        </div>
       )}
       {erro && <p className="mb-6 rounded-md border-l-4 border-cartao bg-pitch-900 p-4">{erro}</p>}
       {resultado && <ResultadoSync resultado={resultado} />}

@@ -142,9 +142,10 @@ def test_so_o_pc_e_o_celular_no_tailscale_entram(cliente, monkeypatch):
     assert [api._ip_conhecido(ip) for ip in ("10.148.134.225", "10.148.134.11", "10.148.134.7")] == [True, True, False]
     monkeypatch.setenv("VESTIARIO_REDE_PRIVADA", "192.168.0.0/24")  # rede marcada como Privada no Windows
     assert [api._ip_conhecido(ip) for ip in ("192.168.0.23", "192.168.1.23")] == [True, False]
-    assert cliente.get("/api/rede").json() == {"url": None}
+    assert cliente.get("/api/rede").json() == {"url": None, "qr": None}
     monkeypatch.setenv("VESTIARIO_REDE_URL", "http://100.101.102.103:8765")
-    assert cliente.get("/api/rede").json() == {"url": "http://100.101.102.103:8765"}
+    rede = cliente.get("/api/rede").json()
+    assert rede["url"] == "http://100.101.102.103:8765" and rede["qr"].startswith("data:image/svg+xml")
 
 
 def test_escudo(cliente):
