@@ -82,9 +82,11 @@ def perfil(con: sqlite3.Connection, cid: int, ano: int | None = None) -> dict:
         crise = f["folha_semanal"] * 52 > 0.7 * receitas  # ressalva: as receitas do save não têm bilheteria
     if s["folga_salarial"] is not None and anual:
         crise = crise or s["folga_salarial"] < 0.05 * (s["folga_salarial"] + anual)
+    for c in copas:
+        c["fase"], c["eliminado"] = fase_na_copa(con, cid, clube, c["chave"])
     ultimo = con.execute("SELECT balanco FROM acordo WHERE carreira_id = ? AND clube_idx = ? AND ano < ? "
                          "AND balanco IS NOT NULL ORDER BY ano DESC LIMIT 1", (cid, clube, ano)).fetchone()
-    return {"ano": ano, "clube": s["clube_nome"], "liga": liga, "copas": copas, "divisao": divisao,
+    return {"ano": ano, "data_jogo": s["data_jogo"], "clube": s["clube_nome"], "liga": liga, "copas": copas, "divisao": divisao,
             "posicao_valor": posicao_valor, "porte": _porte(posicao_valor) if posicao_valor else "medio",
             "rebaixado": div_anterior is not None and divisao > div_anterior,
             "promovido": div_anterior is not None and divisao < div_anterior, "crise": crise,
@@ -118,7 +120,7 @@ FAIXA = {"meta_liga": (2, 1), "meta_copa": (1, 1), "contratacoes": (2, 1), "teto
          "vender_salarios": (1, 1)}  # (amplitude em volta do valor base, passo)
 AFROUXA = {"meta_liga": 1, "meta_copa": -1, "contratacoes": 1, "teto_contratacao": 1, "vender_para_comprar": -1,
            "livres": 1, "emprestimos": 1, "folha_maxima": 1, "vender_salarios": -1}  # sentido de afrouxar
-LIMITES = {"meta_liga": (1, 20), "meta_copa": (0, 5), "contratacoes": (0, 10), "teto_contratacao": (0, 100),
+LIMITES = {"meta_liga": (1, 20), "meta_copa": (1, 5), "contratacoes": (0, 10), "teto_contratacao": (0, 100),
            "vender_para_comprar": (0, 100), "livres": (0, 10), "emprestimos": (0, 10), "folha_maxima": (50, 150),
            "vender_salarios": (0, 5)}
 JANELA = {1: "de janeiro", 2: "do meio do ano"}
@@ -139,8 +141,9 @@ def proposta(p: dict) -> list[dict]:
         itens.append(_item("meta_liga", min(v["meta_liga"], len(p["liga"]["times"]))))
     if v["meta_copa"]:
         for c in p["copas"]:
-            itens.append(_item("meta_copa", 2 if c["nome"] == "Copa Libertadores" else 1, copa=c["nome"],
-                               chave=c["chave"]))
+            meta = 2 if c["nome"] == "Copa Libertadores" else 1
+            if not c["eliminado"] and c["fase"] < meta:  # copa já decidida para o clube não vira meta
+                itens.append(_item("meta_copa", meta, copa=c["nome"], chave=c["chave"]))
     for janela, n in enumerate(v["contratacoes"], start=1):
         itens.append(_item("contratacoes", n, janela=janela))
     if p["orcamento"] is not None:
@@ -151,7 +154,7 @@ def proposta(p: dict) -> list[dict]:
     itens.append(_item("emprestimos", v["emprestimos"]))
     if v["folha_maxima"] is not None and p["folha_semanal"]:
         itens.append(_item("folha_maxima", v["folha_maxima"], folha=p["folha_semanal"]))
-    if v["vender_salarios"] and p["maiores_salarios"]:
+    if v["vender_salarios"] and p["maiores_salarios"] and p["data_jogo"] <= f"{p['ano']}-09-30":
         itens.append(_item("vender_salarios", v["vender_salarios"], jogadores=p["maiores_salarios"]))
     return itens
 
@@ -226,17 +229,20 @@ def _janela_de(data: str) -> int:
     return 1 if data[5:7] <= "06" else 2
 
 
-def mercado(con: sqlite3.Connection, cid: int, clube: int, ano: int) -> tuple[list[dict], list[dict]]:
-    """Chegadas e saídas do ano, pela aba Transferências. A janela (1 = janeiro a junho, 2 = julho a dezembro) é a da
-    sincronização em que o negócio apareceu; o valor é em R$ (negativo = o clube pagou; None = sem negócio no livro);
-    empréstimo = a chegada teve contrato de empréstimo em alguma sincronização do ano."""
+def mercado(con: sqlite3.Connection, cid: int, clube: int, ano: int, desde: str) -> tuple[list[dict], list[dict]]:
+    """Chegadas e saídas do ano, pela aba Transferências, só das janelas que começam em `desde` (a data do acordo) ou
+    depois: a janela que começou antes do acordo (a da virada do ano, por exemplo) e o livro da 1ª sincronização (sem
+    início) ficam de fora. Isso substitui a contagem desde 01/01 da spec com a mesma intenção: o acordo nasce na 1ª
+    sincronização do ano, então não dá para comprar antes e assinar depois. A janela (1 = janeiro a junho, 2 = julho a
+    dezembro) é a da sincronização em que o negócio apareceu; o valor é em R$ (negativo = o clube pagou; None = sem
+    negócio no livro); empréstimo = a chegada teve contrato de empréstimo em alguma sincronização do ano."""
     emprestados = {r[0] for r in con.execute(
         "SELECT DISTINCT c.player_id FROM contrato c JOIN sincronizacao s ON s.id = c.sincronizacao_id WHERE "
         "s.carreira_id = ? AND s.clube_idx = ? AND c.emprestimo = 1 AND substr(s.data_jogo, 1, 4) = ?",
         (cid, clube, str(ano)))}
     chegadas, saidas = [], []
     for j in banco.transferencias(con, cid)["janelas"]:
-        if j["ate"][:4] != str(ano):
+        if j["ate"][:4] != str(ano) or j["de"] is None or j["de"] < desde:
             continue
         janela = _janela_de(j["ate"])
         chegadas += [{"player_id": x["player_id"], "nome": x["nome"], "janela": janela, "valor": x["valor"],
@@ -296,7 +302,7 @@ def avaliar(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str, registra
     ganham o resultado final do ano."""
     clube, ano = acordo["clube_idx"], acordo["ano"]
     vale = registrar and acordo["estado"] in ("assinado", "imposto")
-    chegadas, saidas = mercado(con, cid, clube, ano)
+    chegadas, saidas = mercado(con, cid, clube, ano, acordo["data_jogo"])
     liga, _ = competicoes_do_ano(con, cid, ano, clube)
     s = banco._ultima(con, cid)
     elenco = {r[0] for r in con.execute("SELECT player_id FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
@@ -371,8 +377,9 @@ def avaliar(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str, registra
             detalhe = {"folha": folha, "teto": teto}
             if folha and folha > teto:
                 estado = "quebrado"
-                quebra(f"folha_maxima:{ano}:{_janela_de(hoje)}",
-                       f"Folha semanal de {_dinheiro(folha)}, acima de {_dinheiro(teto)}", -10)
+                if hoje[:4] == str(ano):  # no balanço da virada, a folha já é a do ano novo
+                    quebra(f"folha_maxima:{ano}:{_janela_de(hoje)}",
+                           f"Folha semanal de {_dinheiro(folha)}, acima de {_dinheiro(teto)}", -10)
             elif folha and folha > 0.95 * teto:
                 estado = "em_risco"
         elif t == "vender_salarios":
@@ -448,6 +455,10 @@ def _vence_a_reuniao(acordo: dict, hoje: str) -> bool:
 def _balanco(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str) -> None:
     """Fecha o ano: confere as metas e o vender_para_comprar, lança os eventos e guarda o resultado."""
     clube, ano = acordo["clube_idx"], acordo["ano"]
+    if acordo["estado"] == "proposto":  # nunca assinado nem imposto: fecha sem cobrar nada nem fazer balanço
+        con.execute("UPDATE acordo SET estado = 'encerrado' WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
+                    (cid, clube, ano))
+        return
     metas = {}
     for i in avaliar(con, cid, acordo, hoje, registrar=True, balanco=True):
         if i["tipo"] == "meta_liga" and i["detalhe"]["posicao"] is not None:
@@ -573,7 +584,7 @@ def pendencias(con: sqlite3.Connection, cid: int) -> list[dict]:
     if ativo := _ultimato_ativo(con, cid, clube):
         r = situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube)
         lista.append({"tipo": "ultimato",
-                      "texto": f"Ultimato: {r['pontos']} de 7 pontos, faltam {_plural(r['faltam'], 'jogo', 'jogos')}."})
+                      "texto": f"Ultimato: {r['pontos']} de {PONTOS_ULTIMATO} pontos, faltam {_plural(r['faltam'], 'jogo', 'jogos')}."})
     if revisao(con, cid) is not None:
         lista.append({"tipo": "revisao", "texto": "A diretoria quer revisar o acordo no meio do ano."})
     return lista
@@ -582,7 +593,7 @@ def pendencias(con: sqlite3.Connection, cid: int) -> list[dict]:
 def _preco(p: dict, conf: int) -> int:
     """Quanto de confiança custa um passo (spec, seção 3)."""
     c = 8
-    if p["porte"] == "grande" or conf >= 70:
+    if p["porte"] == "grande" or conf >= FAIXAS_CONFIANCA[2]:
         c -= 2
     if p["crise"]:
         c += 4
@@ -625,7 +636,8 @@ def cardapio(acordo: dict, conf: int) -> list[dict]:
             opcoes.append({"id": f"{n}:confianca", "item": n, "novo": novo, "preco": {"confianca": -c}})
             if meta is not None and n != meta and (m := _passo(itens[meta], -1)) is not None:
                 opcoes.append({"id": f"{n}:meta", "item": n, "novo": novo, "preco": {"meta_liga": m}})
-            if n != venda and p["maiores_salarios"] and (venda is None or _passo(itens[venda], -1) is not None):
+            if (n != venda and p["maiores_salarios"] and acordo["data_jogo"] <= f"{acordo['ano']}-09-30"
+                    and (venda is None or _passo(itens[venda], -1) is not None)):
                 opcoes.append({"id": f"{n}:venda", "item": n, "novo": novo,
                                "preco": {"vender_salarios": itens[venda]["valor"] + 1 if venda is not None else 1}})
         if (novo := _passo(item, -1)) is not None:
@@ -691,7 +703,8 @@ def revisao(con: sqlite3.Connection, cid: int) -> dict | None:
     conf = confianca(con, cid, clube)
     itens = avaliar(con, cid, acordo, hoje, registrar=False)
     meta = next((i for i in itens if i["tipo"] == "meta_liga"), None)
-    mercado_ = [n for n, i in enumerate(itens) if i["tipo"] in MERCADO]
+    # a janela de janeiro já fechou em julho: não se mexe nela
+    mercado_ = [n for n, i in enumerate(itens) if i["tipo"] in MERCADO and i.get("janela") != 1]
     if conf >= FAIXAS_CONFIANCA[2] and (meta is None or meta["estado"] == "em_dia"):
         tipo = "afrouxar"
         opcoes = [{"id": f"rev:{n}", "item": n, "novo": v} for n in mercado_
@@ -791,6 +804,11 @@ def reuniao(con: sqlite3.Connection, cid: int, texto: str) -> None:
             (cid, clube, ano, ordem + 1, "presidente", resposta, json.dumps(ofertas), agora)])
 
 
+def _avaliar_sem_registrar(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str) -> list[dict]:
+    """Para mostrar: o acordo encerrado aparece com o resultado final, não com o andamento."""
+    return avaliar(con, cid, acordo, hoje, registrar=False, balanco=acordo["estado"] == "encerrado")
+
+
 def estado(con: sqlite3.Connection, cid: int) -> dict:
     """Tudo o que a aba Diretoria mostra."""
     s, clube, ano, acordo = _do_ano(con, cid)
@@ -800,7 +818,7 @@ def estado(con: sqlite3.Connection, cid: int) -> dict:
             "demitido": demitido(con, cid, clube), "pendencias": pendencias(con, cid),
             "perfil": acordo["perfil"] if acordo else perfil(con, cid),
             "acordo": acordo and {"estado": acordo["estado"], "assinado_data": acordo["assinado_data"],
-                                  "itens": avaliar(con, cid, acordo, s["data_jogo"], registrar=False)},
+                                  "itens": _avaliar_sem_registrar(con, cid, acordo, s["data_jogo"])},
             "cardapio": cardapio(acordo, conf) if acordo else [],
             "mensagens": mensagens(con, cid, clube, ano), "revisao": revisao(con, cid),
             "ultimato": situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube) if ativo else None,
@@ -816,7 +834,7 @@ def fatos_da_diretoria(con: sqlite3.Connection, cid: int) -> dict | None:
         return None
     fatos = {"confianca_da_diretoria": confianca(con, cid, clube), "acordo_do_ano": acordo["estado"],
              "exigencias": [{"exigencia": i["descricao"], "estado": i["estado"].replace("_", " "), "andamento": i["uso"]}
-                            for i in avaliar(con, cid, acordo, s["data_jogo"], registrar=False)]}
+                            for i in _avaliar_sem_registrar(con, cid, acordo, s["data_jogo"])]}
     if d := demitido(con, cid, clube):
         fatos["demitido_em"] = d
     return fatos
@@ -826,7 +844,7 @@ def alertas(con: sqlite3.Connection, cid: int) -> list[dict]:
     """Pendências e itens em risco ou quebrados, para o quadro Precisa de atenção."""
     lista = pendencias(con, cid)
     s, clube, ano, acordo = _do_ano(con, cid)
-    if acordo and not demitido(con, cid, clube):
+    if acordo and acordo["estado"] != "encerrado" and not demitido(con, cid, clube):
         for i in avaliar(con, cid, acordo, s["data_jogo"], registrar=False):
             if i["estado"] in ("em_risco", "quebrado"):
                 texto = i["descricao"][0].upper() + i["descricao"][1:]

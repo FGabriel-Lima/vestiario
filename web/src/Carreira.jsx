@@ -2322,11 +2322,15 @@ function Termometro({ valor, demitido, faixas: [f1, f2, f3] }) {
         className="relative mt-4 h-4 overflow-hidden rounded-full bg-pitch-800"
       >
         <div className={`h-full ${cor} transition-[width] duration-500 motion-reduce:transition-none`} style={{ width: `${valor}%` }} />
-        {[15, 40, 70].map((m) => (
+        {[f1, f2, f3].map((m) => (
           <span key={m} aria-hidden="true" className="absolute inset-y-0 w-px bg-pitch-950" style={{ left: `${m}%` }} />
         ))}
       </div>
-      <div aria-hidden="true" className="mt-1 grid grid-cols-[15fr_25fr_30fr_30fr] font-kit text-xs uppercase tracking-wide text-muted">
+      <div
+        aria-hidden="true"
+        className="mt-1 grid font-kit text-xs uppercase tracking-wide text-muted"
+        style={{ gridTemplateColumns: `${f1}fr ${f2 - f1}fr ${f3 - f2}fr ${100 - f3}fr` }}
+      >
         <span>ultimato</span>
         <span>desconfiada</span>
         <span>atenta</span>
@@ -2382,6 +2386,7 @@ function Oferta({ o, onAceitar, rotulo = "Aceitar" }) {
 function SalaDaDiretoria({ id, d, agir, regras }) {
   const [texto, setTexto] = useState("");
   const [falando, setFalando] = useState(false);
+  const [assinando, setAssinando] = useState(false);
   const fim = useRef(null);
   useEffect(() => {
     fim.current?.scrollIntoView({ block: "end" });
@@ -2464,7 +2469,14 @@ function SalaDaDiretoria({ id, d, agir, regras }) {
             ))}
           </ul>
         </details>
-        <button onClick={() => agir(api.assinarAcordo(id))} className="w-full rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110">
+        <button
+          disabled={assinando}
+          onClick={() => {
+            setAssinando(true);
+            agir(api.assinarAcordo(id)).finally(() => setAssinando(false));
+          }}
+          className="w-full rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110 disabled:opacity-50"
+        >
           Assinar acordo
         </button>
         <p className="text-xs text-muted">Sem assinatura até o 1º jogo da liga, a diretoria impõe a proposta e perde {regras.falta_reuniao} de confiança.</p>

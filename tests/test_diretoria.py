@@ -81,7 +81,9 @@ def test_crise_pela_folha_ou_pela_folga(con):
 
 PERFIL = {"porte": "medio", "promovido": False, "rebaixado": False, "crise": False, "orcamento": 1_000_000,
           "folha_semanal": 50_000, "maiores_salarios": [10, 11, 12, 13, 14], "liga": {"times": list(range(20))},
-          "copas": [{"nome": "Copa Libertadores", "chave": "L|2026"}, {"nome": "Copa do Brasil", "chave": "C|2026"}]}
+          "copas": [{"nome": "Copa Libertadores", "chave": "L|2026", "fase": 0, "eliminado": False},
+                    {"nome": "Copa do Brasil", "chave": "C|2026", "fase": 0, "eliminado": False}],
+          "ano": 2026, "data_jogo": "2026-01-10"}
 
 
 def valores(itens):
@@ -126,7 +128,7 @@ def test_descricao_dos_itens():
 
 
 def acordo_de_teste(itens, estado="assinado", ano=2026):
-    return {"clube_idx": 0, "ano": ano, "estado": estado, "itens": itens}
+    return {"clube_idx": 0, "ano": ano, "estado": estado, "itens": itens, "data_jogo": f"{ano}-01-01"}
 
 
 def test_confianca_soma_presa_e_sem_repetir(con):
@@ -150,7 +152,7 @@ def mercado_movimentado(con):
 
 def test_mercado_do_ano(con):
     mercado_movimentado(con)
-    chegadas, saidas = diretoria.mercado(con, 1, 0, 2026)
+    chegadas, saidas = diretoria.mercado(con, 1, 0, 2026, "2026-01-10")
     assert sorted((c["player_id"], c["janela"], c["valor"], c["emprestimo"]) for c in chegadas) == [
         (13, 1, -1000 * MOEDA, False), (14, 1, None, False), (15, 1, None, True)]
     assert [(s["player_id"], s["valor"]) for s in saidas] == [(11, 300 * MOEDA)]
@@ -212,13 +214,19 @@ def test_reuniao_pendente_e_acordo_imposto_no_primeiro_jogo(con):
     assert diretoria.confianca(con, 1, 0) == 55  # imposto uma vez só
 
 
-def test_balanco_no_fim_da_liga(con):
+def acordo_assinado_e_liga_encerrada(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    diretoria.assinar(con, 1)
     sincronizar(con, "2026-06-30", temporada(2026, 4))  # liga toda disputada: A em 1º
     diretoria.atualizar(con, 1)
+
+
+def test_balanco_no_fim_da_liga(con):
+    acordo_assinado_e_liga_encerrada(con)
     a = diretoria._acordo(con, 1, 0, 2026)
     assert a["estado"] == "encerrado" and a["balanco"]["metas"] == {"meta_liga": "cumprido"}
-    # sem imposição (o acordo nasceu depois do 1º jogo e ganha 30 dias); a meta de 3º foi cumprida: +15
-    assert diretoria.confianca(con, 1, 0) == 60 + 15
+    assert diretoria.confianca(con, 1, 0) == 60 + 15  # a meta de 3º foi cumprida
     sincronizar(con, "2027-01-10", temporada(2026, 4) + temporada(2027, 0))
     diretoria.atualizar(con, 1)
     assert diretoria._acordo(con, 1, 0, 2027)["perfil"]["momento"] == "cumpriu"
@@ -367,6 +375,8 @@ def test_revisao_afrouxa_com_confianca_alta(con):
     diretoria.atualizar(con, 1)
     r = diretoria.revisao(con, 1)
     assert r["tipo"] == "afrouxar" and r["opcoes"]
+    itens = diretoria._acordo(con, 1, 0, 2026)["itens"]
+    assert all(itens[o["item"]].get("janela") != 1 for o in r["opcoes"])  # a janela de janeiro já fechou
     o = r["opcoes"][0]
     diretoria.responder_revisao(con, 1, o["id"])
     assert diretoria._acordo(con, 1, 0, 2026)["itens"][o["item"]]["valor"] == o["novo"]
@@ -429,3 +439,88 @@ def test_estado_sem_acordo_ainda(con):
     e = diretoria.estado(con, 1)
     assert e["acordo"] is None and e["cardapio"] == [] and e["perfil"]["porte"] == "grande"
     assert diretoria.fatos_da_diretoria(con, 1) is None
+
+
+def test_mercado_so_conta_o_que_veio_depois_do_acordo(con):
+    """Substitui a contagem desde 01/01 da spec: o livro da 1ª sincronização (janela sem início) e a janela que começou
+    antes do acordo não contam; a que começa na data do acordo conta."""
+    sincronizar(con, "2025-08-19", temporada(2025, 0), elenco=(10, 11, 12, 13), negocios=[(13, -1000, 1)])
+    diretoria.atualizar(con, 1)
+    assert diretoria.mercado(con, 1, 0, 2025, "2025-08-19") == ([], [])
+    sincronizar(con, "2026-01-31", temporada(2025, 4) + temporada(2026, 0), elenco=(10, 11, 12, 13, 14))
+    diretoria.atualizar(con, 1)
+    a = diretoria._acordo(con, 1, 0, 2026)
+    assert a["data_jogo"] == "2026-01-31"
+    sincronizar(con, "2026-02-05", temporada(2025, 4) + temporada(2026, 0), elenco=(10, 11, 12, 13, 14, 15))
+    chegadas, _ = diretoria.mercado(con, 1, 0, 2026, a["data_jogo"])
+    assert [(c["player_id"], c["janela"]) for c in chegadas] == [(15, 1)]
+    r = diretoria.avaliar(con, 1, a, "2026-02-05", registrar=False)
+    assert next(i for i in r if i["tipo"] == "contratacoes" and i["janela"] == 1)["detalhe"] == {"usadas": 1}
+    assert next(i for i in r if i["tipo"] == "livres")["detalhe"] == {"usados": 1}
+
+
+def test_copa_ja_decidida_nao_entra_na_proposta():
+    copas = [{"nome": "Copa do Brasil", "chave": "C|2026", "fase": 0, "eliminado": True},
+             {"nome": "Copa Libertadores", "chave": "L|2026", "fase": 2, "eliminado": False},
+             {"nome": "Copa Sul-Americana", "chave": "S|2026", "fase": 0, "eliminado": False}]
+    assert [k[1] for k in valores(diretoria.proposta({**PERFIL, "copas": copas})) if k[0] == "meta_copa"] == [
+        "Copa Sul-Americana"]
+
+
+def test_copa_eliminada_antes_do_acordo(con):
+    copa = [jogo("2026-01-20", 0, 1, (0, 1), rodada=46, comp=31), jogo("2026-01-27", 1, 0, (1, 0), rodada=46, comp=31)]
+    sincronizar(con, "2026-01-30", temporada(2026, 0) + copa)
+    diretoria.atualizar(con, 1)
+    assert diretoria._acordo(con, 1, 0, 2026)["perfil"]["copas"][0]["eliminado"] is True
+    assert not any(i["tipo"] == "meta_copa" for i in diretoria._acordo(con, 1, 0, 2026)["itens"])
+
+
+def test_acordo_depois_de_30_09_nao_pede_venda_de_salarios(con):
+    sincronizar(con, "2026-10-05", temporada(2026, 0), contratos={10: (52_000, 0, "2028-01-31")},
+                receitas={"tv": 1000}, folga_salarial=100_000)  # em crise: a proposta pediria 1 venda
+    diretoria.atualizar(con, 1)
+    a = diretoria._acordo(con, 1, 0, 2026)
+    assert a["perfil"]["crise"] and not any(i["tipo"] == "vender_salarios" for i in a["itens"])
+    assert not any(o["id"].endswith(":venda") for o in diretoria.cardapio(a, 60))
+
+
+def test_revisao_nao_aperta_a_janela_de_janeiro(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    diretoria.assinar(con, 1)
+    diretoria._evento(con, 1, 0, "teste", "2026-01-10", "teste", -25)
+    sincronizar(con, "2026-07-05", temporada(2026, 2))
+    diretoria.atualizar(con, 1)
+    r = diretoria.revisao(con, 1)
+    alvo = diretoria._acordo(con, 1, 0, 2026)["itens"][r["opcoes"][0]["item"]]
+    assert (alvo["tipo"], alvo["janela"]) == ("contratacoes", 2)  # a de janeiro tinha mais folga, mas já fechou
+
+
+def test_acordo_encerrado_mostra_o_resultado(con):
+    acordo_assinado_e_liga_encerrada(con)
+    sincronizar(con, "2026-07-10", temporada(2026, 4), elenco=(10, 11, 12, 13, 14))  # 2 livres: estaria em risco
+    meta = next(i for i in diretoria.estado(con, 1)["acordo"]["itens"] if i["tipo"] == "meta_liga")
+    assert meta["estado"] == "cumprido"
+    assert diretoria.fatos_da_diretoria(con, 1)["exigencias"][0]["estado"] == "cumprido"
+    assert diretoria.alertas(con, 1) == []
+
+
+def test_meta_de_copa_nao_afrouxa_ate_a_fase_inicial():
+    assert diretoria._passo(diretoria._item("meta_copa", 1, copa="Copa do Brasil", chave="C|2026"), 1) is None
+
+
+def test_balanco_na_virada_nao_cobra_a_folha_do_ano_novo(con):
+    sincronizar(con, "2027-01-05", temporada(2027, 0), contratos={10: (52_000, 0, "2028-01-31")})
+    diretoria.avaliar(con, 1, acordo_de_teste([diretoria._item("folha_maxima", 90, folha=1000)]), "2027-01-05",
+                      balanco=True)
+    assert diretoria.confianca(con, 1, 0) == 60
+
+
+def test_acordo_nunca_assinado_fecha_sem_eventos(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    sincronizar(con, "2027-01-05", temporada(2026, 4) + temporada(2027, 0))  # A foi 1º, mas não assinou nada
+    diretoria.atualizar(con, 1)
+    assert diretoria._acordo(con, 1, 0, 2026)["estado"] == "encerrado"
+    assert diretoria.historico(con, 1, 0) == [] and diretoria.confianca(con, 1, 0) == 60
+    assert diretoria._acordo(con, 1, 0, 2027)["perfil"]["momento"] == "estreia"
