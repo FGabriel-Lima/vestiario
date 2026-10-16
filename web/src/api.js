@@ -6,6 +6,26 @@ async function pedir(caminho, opcoes) {
 }
 
 export const api = {
+  diretoria: (id) => pedir(`/carreiras/${id}/diretoria`),
+  falarComPresidente: (id, texto) =>
+    pedir(`/carreiras/${id}/diretoria/reuniao`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto }),
+    }),
+  aceitarOferta: (id, oferta) =>
+    pedir(`/carreiras/${id}/diretoria/aceitar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oferta }),
+    }),
+  assinarAcordo: (id) => pedir(`/carreiras/${id}/diretoria/assinar`, { method: "POST" }),
+  responderRevisao: (id, escolha) =>
+    pedir(`/carreiras/${id}/diretoria/revisao`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ escolha }),
+    }),
   carreiras: () => pedir("/carreiras"),
   rede: () => pedir("/rede"),
   sincronizar: () => pedir("/sincronizar", { method: "POST" }),

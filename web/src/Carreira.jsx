@@ -5,7 +5,7 @@ import Rosto from "./Rosto.jsx";
 
 // As dez seções em quatro grupos: o clube por dentro, os jogos, o que se fala dele e a história
 const GRUPOS = [
-  { nome: "Clube", icone: "shield", abas: ["Visão geral", "Elenco", "Transferências"] },
+  { nome: "Clube", icone: "shield", abas: ["Visão geral", "Elenco", "Transferências", "Diretoria"] },
   { nome: "Jogos", icone: "sports_soccer", abas: ["Partidas", "Campeonatos", "Adversários"] },
   { nome: "Bastidores", icone: "forum", abas: ["Feed", "Conversas"] },
   { nome: "História", icone: "emoji_events", abas: ["Lendas", "Pelo mundo"] },
@@ -21,11 +21,14 @@ const SOBRE = {
   Feed: "O que o clube, a imprensa e o mercado postaram a cada sincronização.",
   Conversas: "O auxiliar técnico e os jogadores do elenco.",
   Lendas: "Títulos, recordes e os maiores do clube.",
+  Diretoria: "O acordo da temporada, a confiança da diretoria e as reuniões.",
   "Pelo mundo": "Artilheiros, garçons e campeões do resto do mundo.",
 };
 // Abas que olham a carreira inteira e não usam o seletor de temporada
 // (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
-const DA_CARREIRA = new Set(["Feed", "Conversas", "Campeonatos", "Transferências", "Adversários", "Lendas"]);
+const DA_CARREIRA = new Set(["Feed", "Conversas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Diretoria"]);
+// no celular, 4 abas dividem a largura: rótulos curtos
+const CURTO = { "Visão geral": "Geral", Transferências: "Mercado" };
 
 const GRAMADO = "#0b1a10"; // --color-pitch-950
 const canais = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -190,7 +193,7 @@ export default function Carreira({ id, onVoltar }) {
                 a === aba ? "border-destaque text-chalk" : "border-transparent text-muted"
               }`}
             >
-              {a}
+              {CURTO[a] ?? a}
               {contador(a)}
             </button>
           ))}
@@ -233,6 +236,7 @@ export default function Carreira({ id, onVoltar }) {
               {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} onFicha={setFicha} />}
               {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
               {aba === "Transferências" && <Transferencias id={id} onConversar={conversar} />}
+              {aba === "Diretoria" && <Diretoria id={id} />}
               {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
               {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
               {aba === "Pelo mundo" && <PeloMundo id={id} ano={ano} clube={carreira.clube_idx} />}
@@ -1580,6 +1584,31 @@ function ArteDoPost({ post }) {
         </div>
       );
     }
+    case "acordo":
+    case "diretoria_insatisfeita":
+    case "ultimato":
+    case "demissao":
+    case "balanco": {
+      const selos = { acordo: "Acordo assinado", diretoria_insatisfeita: "Diretoria insatisfeita", ultimato: "Ultimato", demissao: "Fim de ciclo", balanco: "Balanço da temporada" };
+      return (
+        <div className={base}>
+          {selo(post.tipo === "acordo" && d.imposto ? "Acordo imposto" : selos[post.tipo], post.perfil === "geglobo" ? "text-[#06aa48]" : "text-destaque")}
+          {post.tipo === "acordo" ? (
+            <ul className="space-y-2 text-lg">
+              {d.exigencias.slice(0, 6).map((e) => (
+                <li key={e} className="flex gap-2 first-letter:uppercase">
+                  <span aria-hidden="true" className="icone text-gold">check</span>
+                  {e}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="font-kit text-3xl font-extrabold uppercase leading-tight">{d.motivo}</p>
+          )}
+          <p className="font-kit text-sm uppercase tracking-wide opacity-70">{post.tipo === "acordo" ? `Temporada ${d.ano}` : "Diretoria"}</p>
+        </div>
+      );
+    }
     case "proposta":
       return (
         <div className={base}>
@@ -1917,7 +1946,16 @@ function Conversa({ id, contato, onVoltar, onMudou, onFicha }) {
 function Atencao({ id, onFicha, onConversar, onAba }) {
   const { dados: a } = useDados(() => api.atencao(id), [id]);
   if (!a) return null;
+  const ICONE_DIRETORIA = { reuniao: "groups", revisao: "rule", ultimato: "timer", demissao: "door_open", em_risco: "warning", quebrado: "gavel" };
   const linhas = [
+    ...(a.diretoria ?? []).map((x, k) => ({
+      chave: `d${k}`,
+      icone: ICONE_DIRETORIA[x.tipo] ?? "info",
+      cor: ["ultimato", "demissao", "quebrado"].includes(x.tipo) ? "text-cartao" : x.tipo === "em_risco" ? "text-gold" : "text-destaque",
+      rosto: null,
+      texto: <>{x.texto}</>,
+      acao: ["Abrir diretoria", () => onAba("Diretoria")],
+    })),
     ...a.propostas.map((p) => ({
       chave: `p${p.player_id}-${p.clube.nome}`,
       icone: "mail",
@@ -1987,7 +2025,7 @@ function Atencao({ id, onFicha, onConversar, onAba }) {
             {/* a linha inteira é o botão; no celular a ação vira só uma seta, para não ocupar outra linha */}
             <button onClick={l.acao[1]} className="group flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-pitch-800/60">
               <span aria-hidden="true" className={`icone ${l.cor}`}>{l.icone}</span>
-              <Rosto id={l.rosto} className="size-8 shrink-0" />
+              {l.rosto != null ? <Rosto id={l.rosto} className="size-8 shrink-0" /> : <span aria-hidden="true" className="size-8 shrink-0" />}
               <span className="min-w-0 flex-1 leading-snug">{l.texto}</span>
               <span className="hidden shrink-0 rounded-full border border-pitch-700 px-3 py-1 text-sm group-hover:border-destaque group-hover:text-destaque sm:inline">
                 {l.acao[0]}
@@ -2218,6 +2256,270 @@ function ValorNoTempo({ valores }) {
           <Dinheiro valor={ultimo.valor} className="font-kit text-2xl font-bold text-gold" /> sem mudança desde {dataBR(primeiro.data)}
         </p>
       )}
+    </section>
+  );
+}
+
+// A diretoria. Assinatura da tela: o termômetro da confiança, com as faixas que mudam o humor da diretoria
+// (abaixo de 15 vem o ultimato). Todo número vem do Vestiário; o presidente (IA) só fala e escolhe ofertas.
+const ESTADO_ITEM = {
+  em_dia: ["em dia", "bg-pitch-700 text-chalk"],
+  em_risco: ["em risco", "bg-gold/20 text-gold"],
+  quebrado: ["quebrado", "bg-cartao/20 text-cartao"],
+  cumprido: ["cumprido", "bg-neon/20 text-neon"],
+  nao_cumprido: ["não cumprido", "bg-cartao/20 text-cartao"],
+};
+
+function Diretoria({ id }) {
+  const [versao, setVersao] = useState(0);
+  const { dados: d, erro } = useDados(() => api.diretoria(id), [id, versao]);
+  const [falha, setFalha] = useState(null);
+  if (erro) return <Erro mensagem={erro} />;
+  if (!d) return null;
+  const agir = (pedido) => {
+    setFalha(null);
+    return pedido.then(() => setVersao((v) => v + 1)).catch((e) => setFalha(e.message));
+  };
+  return (
+    <div className="space-y-10">
+      <Termometro valor={d.confianca} demitido={d.demitido} />
+      {d.demitido && (
+        <p className="rounded-md border-l-4 border-cartao bg-pitch-900 p-4">{d.pendencias[0]?.texto}</p>
+      )}
+      {falha && <Erro mensagem={falha} />}
+      {d.ultimato && <Ultimato u={d.ultimato} />}
+      {d.revisao && d.revisao.tipo !== "nada" && <Revisao id={id} r={d.revisao} agir={agir} />}
+      {!d.acordo && <p className="text-muted">A diretoria se reúne depois da próxima sincronização.</p>}
+      {d.acordo?.estado === "proposto" ? <SalaDaDiretoria id={id} d={d} agir={agir} /> : <Acordo d={d} />}
+      <Historico itens={d.historico} />
+    </div>
+  );
+}
+
+function Termometro({ valor, demitido }) {
+  const humor = demitido ? "Demitido" : valor < 15 ? "Ultimato" : valor < 40 ? "Desconfiada" : valor < 70 ? "Atenta" : "Confiante";
+  const cor = valor < 15 ? "bg-cartao" : valor < 40 ? "bg-gold" : valor < 70 ? "bg-chalk/70" : "bg-neon";
+  return (
+    <section aria-label="Confiança da diretoria">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Confiança da diretoria</p>
+          <p className="font-kit text-7xl font-extrabold leading-none">
+            {valor}
+            <span className="text-3xl text-muted">/100</span>
+          </p>
+        </div>
+        <span className="fita text-lg">{humor}</span>
+      </div>
+      <div
+        role="meter"
+        aria-label="Confiança"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={valor}
+        className="relative mt-4 h-4 overflow-hidden rounded-full bg-pitch-800"
+      >
+        <div className={`h-full ${cor} transition-[width] duration-500 motion-reduce:transition-none`} style={{ width: `${valor}%` }} />
+        {[15, 40, 70].map((m) => (
+          <span key={m} aria-hidden="true" className="absolute inset-y-0 w-px bg-pitch-950" style={{ left: `${m}%` }} />
+        ))}
+      </div>
+      <div aria-hidden="true" className="mt-1 grid grid-cols-[15fr_25fr_30fr_30fr] font-kit text-xs uppercase tracking-wide text-muted">
+        <span>ultimato</span>
+        <span>desconfiada</span>
+        <span>atenta</span>
+        <span className="text-right">confiante</span>
+      </div>
+    </section>
+  );
+}
+
+function Acordo({ d }) {
+  if (!d.acordo) return null;
+  const a = d.acordo;
+  const situacao = a.estado === "imposto" ? "Imposto pela diretoria" : a.estado === "encerrado" ? "Temporada encerrada" : `Assinado em ${dataBR(a.assinado_data)}`;
+  return (
+    <section aria-labelledby="acordo">
+      <h2 id="acordo" className="font-kit text-2xl font-semibold uppercase">Acordo de {d.ano}</h2>
+      <p className="mb-4 text-sm text-muted">{situacao}</p>
+      <ul className="divide-y divide-pitch-800 rounded-md border border-pitch-800 bg-pitch-900">
+        {a.itens.map((i, k) => {
+          const [rotulo, cor] = ESTADO_ITEM[i.estado];
+          return (
+            <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
+              <span className="min-w-0 flex-1 basis-60 first-letter:uppercase">{i.descricao}</span>
+              {i.uso && <span className="text-sm text-muted">{i.uso}</span>}
+              <span className={`rounded-sm px-2 py-0.5 font-kit text-sm font-semibold uppercase tracking-wide ${cor}`}>{rotulo}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function Oferta({ o, onAceitar, rotulo = "Aceitar" }) {
+  const [enviando, setEnviando] = useState(false);
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-pitch-700 bg-pitch-950 px-3 py-2 text-sm text-chalk">
+      <span className="min-w-0 flex-1 first-letter:uppercase">{o.texto}</span>
+      <button
+        disabled={enviando}
+        onClick={() => {
+          setEnviando(true);
+          onAceitar().finally(() => setEnviando(false));
+        }}
+        className="shrink-0 rounded-full border border-destaque px-3 py-1 text-destaque hover:bg-destaque hover:text-pitch-950 disabled:opacity-50"
+      >
+        {rotulo}
+      </button>
+    </div>
+  );
+}
+
+function SalaDaDiretoria({ id, d, agir }) {
+  const [texto, setTexto] = useState("");
+  const [falando, setFalando] = useState(false);
+  const fim = useRef(null);
+  useEffect(() => {
+    fim.current?.scrollIntoView({ block: "end" });
+  }, [d.mensagens.length, falando]);
+  const porId = Object.fromEntries(d.cardapio.map((o) => [o.id, o]));
+  const enviar = (e) => {
+    e.preventDefault();
+    const t = texto.trim();
+    if (!t || falando) return;
+    setFalando(true);
+    setTexto("");
+    agir(api.falarComPresidente(id, t)).finally(() => setFalando(false));
+  };
+  return (
+    <section aria-labelledby="sala" className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="flex min-h-[28rem] flex-col rounded-md border border-pitch-800 bg-pitch-900">
+        <h2 id="sala" className="border-b border-pitch-800 px-4 py-3 font-kit text-xl font-semibold uppercase">Sala da diretoria</h2>
+        <ol aria-live="polite" className="max-h-[32rem] flex-1 space-y-3 overflow-y-auto px-4 py-4">
+          {d.mensagens.length === 0 && (
+            <li className="text-sm text-muted">O presidente trouxe a proposta. Peça o que precisa: cada concessão tem um preço.</li>
+          )}
+          {d.mensagens.map((m, k) =>
+            m.autor === "tecnico" ? (
+              <li key={k} className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-pitch-700 px-4 py-2.5">{m.texto}</li>
+            ) : (
+              <li key={k} className="mr-auto max-w-[92%] space-y-2">
+                <p className="balao-papel">{m.texto}</p>
+                {m.ofertas.filter((o) => porId[o]).map((o) => (
+                  <Oferta key={o} o={porId[o]} onAceitar={() => agir(api.aceitarOferta(id, o))} />
+                ))}
+              </li>
+            ),
+          )}
+          {falando && (
+            <li className="balao-papel mr-auto flex w-16 items-center justify-center gap-1" aria-label="O presidente está respondendo">
+              {[0, 1, 2].map((k) => (
+                <span key={k} className="ponto-digitando" style={{ animationDelay: `${k * 160}ms` }} />
+              ))}
+            </li>
+          )}
+          <li ref={fim} aria-hidden="true" />
+        </ol>
+        <form onSubmit={enviar} className="flex gap-2 border-t border-pitch-800 p-3">
+          <label htmlFor="presidente" className="sr-only">Mensagem para o presidente</label>
+          <input
+            id="presidente"
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            placeholder="Peça uma mudança no acordo"
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-full border border-pitch-700 bg-pitch-950 px-4 py-2 placeholder:text-muted"
+          />
+          <button type="submit" disabled={falando || !texto.trim()} aria-label="Enviar" className="grid size-10 shrink-0 place-items-center rounded-full bg-destaque text-pitch-950 disabled:opacity-40">
+            <span aria-hidden="true" className="icone">send</span>
+          </button>
+        </form>
+      </div>
+      <aside className="space-y-4">
+        <div className="bilhete">
+          <span aria-hidden="true" className="fita absolute -top-3 left-6 text-base">Proposta de {d.ano}</span>
+          <ul className="space-y-2 text-sm">
+            {d.acordo.itens.map((i, k) => (
+              <li key={k} className="first-letter:uppercase">
+                {i.descricao}
+                {i.uso && <span className="block text-xs opacity-70">{i.uso}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <details className="rounded-md border border-pitch-800 bg-pitch-900 p-3">
+          <summary className="cursor-pointer font-semibold">O que dá para negociar ({d.cardapio.length})</summary>
+          <ul className="mt-3 space-y-2">
+            {d.cardapio.map((o) => (
+              <li key={o.id}>
+                <Oferta o={o} onAceitar={() => agir(api.aceitarOferta(id, o.id))} />
+              </li>
+            ))}
+          </ul>
+        </details>
+        <button onClick={() => agir(api.assinarAcordo(id))} className="w-full rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110">
+          Assinar acordo
+        </button>
+        <p className="text-xs text-muted">Sem assinatura até o 1º jogo da liga, a diretoria impõe a proposta e perde 5 de confiança.</p>
+      </aside>
+    </section>
+  );
+}
+
+function Revisao({ id, r, agir }) {
+  return (
+    <section aria-labelledby="revisao" className="rounded-md border border-gold/50 bg-pitch-900 p-4">
+      <h2 id="revisao" className="font-kit text-xl font-semibold uppercase">Revisão do meio do ano</h2>
+      <p className="mb-3 text-sm text-muted">
+        {r.tipo === "afrouxar"
+          ? "A campanha agradou: escolha uma exigência para a diretoria afrouxar, sem custo."
+          : "A diretoria quer apertar o acordo. Recusar custa 5 de confiança."}
+      </p>
+      <ul className="space-y-2">
+        {r.opcoes.map((o) => (
+          <li key={o.id}>
+            <Oferta o={o} onAceitar={() => agir(api.responderRevisao(id, o.id))} />
+          </li>
+        ))}
+      </ul>
+      <button onClick={() => agir(api.responderRevisao(id, null))} className="mt-3 text-sm text-muted underline hover:text-chalk">
+        {r.tipo === "afrouxar" ? "Deixar como está" : "Recusar o aperto"}
+      </button>
+    </section>
+  );
+}
+
+function Ultimato({ u }) {
+  return (
+    <section aria-labelledby="ultimato" className="rounded-md border-l-4 border-cartao bg-pitch-900 p-4">
+      <h2 id="ultimato" className="font-kit text-xl font-semibold uppercase text-cartao">Ultimato</h2>
+      <p>
+        A diretoria quer pelo menos 7 pontos nos próximos 5 jogos. Até agora: <b>{plural(u.pontos, "ponto", "pontos")}</b>, faltam{" "}
+        {plural(u.faltam, "jogo", "jogos")}.
+      </p>
+    </section>
+  );
+}
+
+function Historico({ itens }) {
+  if (itens.length === 0) return null;
+  return (
+    <section aria-labelledby="historico">
+      <h2 id="historico" className="mb-3 font-kit text-2xl font-semibold uppercase">Histórico da confiança</h2>
+      <ol className="divide-y divide-pitch-800 text-sm">
+        {itens.slice(0, 30).map((h, k) => (
+          <li key={k} className="grid grid-cols-[5.5rem_1fr_3rem] items-baseline gap-3 py-2">
+            <span className="text-muted">{dataBR(h.data_jogo)}</span>
+            <span>{h.motivo}</span>
+            <span className={`text-right font-kit text-lg ${h.variacao > 0 ? "text-neon" : h.variacao < 0 ? "text-cartao" : "text-muted"}`}>
+              {h.variacao > 0 ? "+" : ""}
+              {h.variacao || "–"}
+            </span>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
