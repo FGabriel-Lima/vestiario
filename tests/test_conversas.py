@@ -120,3 +120,90 @@ def test_precisa_de_atencao(con):
     assert a["contratos"] == [{"player_id": 12, "nome": "Veterano", "fim": "2026-06-30", "emprestimo": False}]
     assert [j["nome"] for j in a["sem_espaco"]] == ["Reserva", "Veterano"]  # sem valor de mercado: por nome
     assert a["promessas"] == []
+
+
+def _ia_do_jogador(monkeypatch, vontade="sair"):
+    chamadas = []
+
+    def falso(sistema, fatos, esquema):
+        chamadas.append(fatos["fatos"])
+        return {"mensagem": f"Professor, mensagem {len(chamadas)}.", "vontade": vontade}
+
+    monkeypatch.setattr(ia, "responder", falso)
+    return chamadas
+
+
+def _segundo_save(con, propostas=(), elenco=(10, 11, 12), outros=((), ())):
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-20", elenco=elenco, idades={10: 25, 11: 19, 12: 36},
+                                               valores={10: 8000}, propostas=propostas, outros=outros), AGORA)
+
+
+def test_jogador_manda_mensagem_quando_chega_proposta(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    assert conversas.reagir_propostas(con, 1) == 1
+    assert chamadas[0]["propostas_novas"] == [{"clube": "Clube B", "valor": 9000 * MOEDA}]
+    assert chamadas[0]["valor_do_nosso_elenco"] == 8000 * MOEDA
+    assert chamadas[0]["jogador"]["nome"] == "Titular"
+    assert conversas.contatos(con, 1)[3]["nao_lidas"] == 1
+    p = banco.propostas(con, 1)[0]
+    assert (p["vontade"], p["fala"]) == ("sair", "Professor, mensagem 1.")
+    assert conversas.atencao(con, 1)["propostas"][0]["vontade"] == "sair"
+    assert conversas.reagir_propostas(con, 1) == 0  # não repete
+    assert conversas.conversa(con, 1, "10")["mensagens"][-1] == {
+        "autor": "contato", "texto": "Professor, mensagem 1.", "data_jogo": "2026-03-01"}
+    assert conversas.contatos(con, 1)[3]["nao_lidas"] == 0  # abrir a conversa marca como lida
+
+
+def test_vontade_fora_do_esperado_vira_dividido(con, monkeypatch):
+    _ia_do_jogador(monkeypatch, vontade="talvez")
+    conversas.reagir_propostas(con, 1)
+    assert banco.propostas(con, 1)[0]["vontade"] == "dividido"
+
+
+def test_jogador_reage_ao_fim_da_proposta(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con)
+    assert conversas.reagir_propostas(con, 1) == 1
+    assert chamadas[1]["propostas_encerradas_agora"] == [
+        {"clube": "Clube B", "valor": 9000 * MOEDA, "sua_vontade": "sair"}]
+    assert banco.propostas(con, 1)[0]["fala"] == "Professor, mensagem 2."
+    assert conversas.reagir_propostas(con, 1) == 0
+
+
+def test_jogador_vendido_se_despede(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, elenco=(11, 12), outros=((10,), ()))
+    assert conversas.reagir_propostas(con, 1) == 1
+    assert chamadas[1]["despedida"] == {"clube_novo": "Clube B"}
+    assert chamadas[1]["jogador"]["nome"] == "Titular"
+    p = banco.propostas(con, 1)[0]
+    assert (p["situacao"], p["fala"]) == ("saiu", "Professor, mensagem 2.")
+
+
+def test_proposta_que_acabou_sem_reacao_fica_calada(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    _segundo_save(con)  # acabou antes de o jogador ter reagido (banco anterior a esta versão)
+    assert conversas.reagir_propostas(con, 1) == 0 and chamadas == []
+
+
+def test_oferta_melhorada_do_mesmo_clube(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, propostas=[(1, 10, 11000)])
+    assert conversas.reagir_propostas(con, 1) == 1
+    assert chamadas[1]["propostas_novas"] == [{"clube": "Clube B", "valor": 11000 * MOEDA, "oferta_anterior": 9000 * MOEDA}]
+    assert "propostas_encerradas_agora" not in chamadas[1]
+    assert conversas.reagir_propostas(con, 1) == 0
+
+
+def test_ia_fora_nao_grava_reacao(con, monkeypatch):
+    def fora(*a):
+        raise ia.IAIndisponivel("fora")
+
+    monkeypatch.setattr(ia, "responder", fora)
+    with pytest.raises(ia.IAIndisponivel):
+        conversas.reagir_propostas(con, 1)
+    assert banco.propostas(con, 1)[0]["vontade"] is None
+    assert conversas.contatos(con, 1)[3]["nao_lidas"] == 0
