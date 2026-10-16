@@ -85,7 +85,7 @@ export default function Carreira({ id, onVoltar }) {
     };
   }, [id, aba, contato]);
   // a conversa aberta já foi lida, mesmo que a lista tenha vindo antes de o servidor marcar
-  const naoLidas = contatos.reduce((n, c) => n + (aba === "Conversas" && c.contato === contato ? 0 : c.nao_lidas ?? 0), 0);
+  const naoLidas = contatos.reduce((n, c) => n + (!(aba === "Conversas" && c.contato === contato) && c.nao_lidas > 0 ? 1 : 0), 0);
   const contador = (a) =>
     a === "Conversas" &&
     naoLidas > 0 && (
@@ -2340,7 +2340,7 @@ function Propostas({ id, lista, onConversar }) {
                 <span className="ml-auto text-sm">até {dataBR(p.ultima)}</span>
                 {p.fala &&
                   (p.situacao === "saiu" ? (
-                    <p className="basis-full truncate pl-8 text-sm italic">“{p.fala}”</p>
+                    <p title={p.fala} className="line-clamp-3 basis-full pl-8 text-sm italic">“{p.fala}”</p>
                   ) : (
                     <button
                       onClick={() => onConversar(String(p.player_id))}

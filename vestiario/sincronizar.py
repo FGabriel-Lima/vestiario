@@ -85,6 +85,8 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pas
         except ia.IAIndisponivel as e:
             avisos.append(f"Mensagens dos jogadores de {nome} sobre as propostas não enviadas: {e} "
                           "Use o botão na carta da proposta.")
+        except Exception as e:  # fronteira de confiança: as mensagens são opcionais, o feed sai mesmo assim
+            avisos.append(f"Mensagens dos jogadores de {nome} não enviadas ({e}).")
         try:
             feed.atualizar(con, cid)
         except ia.IAIndisponivel as e:

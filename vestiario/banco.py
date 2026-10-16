@@ -673,8 +673,9 @@ def fatos_do_jogador(con: sqlite3.Connection, cid: int, pid: int) -> dict | None
         jogador["ultimos_jogos"] = ultimos
     dele = [x for x in propostas(con, cid) if x["player_id"] == pid]
     abertas = [{"clube": x["clube"]["nome"], "valor": x["valor"]} for x in dele if x["situacao"] == "aberta"]
+    com_aberta = {x["clube"]["idx"] for x in dele if x["situacao"] == "aberta"}  # oferta substituída não acabou
     acabaram = [{"clube": x["clube"]["nome"], "valor": x["valor"], "sua_vontade": x["vontade"]}
-                for x in dele if x["situacao"] != "aberta" and x["vontade"]][:3]
+                for x in dele if x["situacao"] != "aberta" and x["vontade"] and x["clube"]["idx"] not in com_aberta][:3]
     proximo = next((p for p in partidas(con, cid) if not p["disputada"] and p["data"] > s["data_jogo"]), None)
     fatos = {"jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(con, s)}
     if abertas:

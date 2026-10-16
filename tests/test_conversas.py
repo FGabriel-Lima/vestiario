@@ -197,6 +197,40 @@ def test_oferta_melhorada_ja_ouvida_fica_calada(con, monkeypatch):
     conversas.reagir_propostas(con, 1)  # reage à de 11000
     _segundo_save(con, propostas=[(1, 10, 11000)], data="2026-04-01")  # a de 9000 some, a de 11000 segue aberta
     assert conversas.reagir_propostas(con, 1) == 0 and len(chamadas) == 2
+    _segundo_save(con, data="2026-04-10")  # a de 11000 acabou: uma só mensagem, só com ela
+    assert conversas.reagir_propostas(con, 1) == 1 and len(chamadas) == 3
+    assert [x["valor"] for x in chamadas[2]["propostas_encerradas_agora"]] == [11000 * MOEDA]
+
+
+def test_proposta_antiga_so_reage_com_o_botao(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    _segundo_save(con, propostas=[(1, 10, 9000)])  # aberta desde 2026-03-01, antes deste save
+    assert conversas.reagir_propostas(con, 1) == 0 and chamadas == []
+    assert conversas.reagir_propostas(con, 1, 10) == 1
+
+
+def test_sincronizacao_reage_a_no_maximo_3_jogadores_os_mais_relevantes(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    # razão valor/mercado: 10 = 1,9; 11 = 0,9; 12 = 3,0; 13 = 1,0
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-20", elenco=(10, 11, 12, 13), idades={10: 25, 11: 19, 12: 36, 13: 30},
+                                               valores={10: 5000, 11: 10000, 12: 3000, 13: 9000},
+                                               propostas=[(1, 10, 9500), (1, 11, 9000), (1, 12, 9000), (1, 13, 9000)]), AGORA)
+    assert conversas.reagir_propostas(con, 1) == 3
+    assert {c["jogador"]["nome"] for c in chamadas} == {"Titular", "Veterano", "Jogador #13"}
+    banco.gravar(con, "ML00000000", fazer_save("2026-04-01", elenco=(10, 11, 12, 13), idades={10: 25, 11: 19, 12: 36, 13: 30},
+                                               valores={10: 5000, 11: 10000, 12: 3000, 13: 9000},
+                                               propostas=[(1, 10, 9500), (1, 11, 9000), (1, 12, 9000), (1, 13, 9000)]), AGORA)
+    assert conversas.reagir_propostas(con, 1) == 0  # o cortado ficou antigo: só o botão o ouve
+    assert conversas.reagir_propostas(con, 1, 11) == 1
+
+
+def test_substituida_nao_entra_como_encerrada_nos_fatos(con, monkeypatch):
+    _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, propostas=[(1, 10, 11000)])
+    f = banco.fatos_do_jogador(con, 1, 10)
+    assert f["propostas_abertas"] == [{"clube": "Clube B", "valor": 11000 * MOEDA}]
+    assert "propostas_que_acabaram" not in f
 
 
 def test_proposta_que_acabou_sem_reacao_fica_calada(con, monkeypatch):

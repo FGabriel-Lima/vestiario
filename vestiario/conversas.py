@@ -43,6 +43,7 @@ ESQUEMA_JOGADOR = {"type": "OBJECT", "properties": {"resposta": {"type": "STRING
                    "required": ["resposta"]}
 
 
+MAX_POR_SINCRONIZACAO = 3  # jogadores que reagem à chegada de propostas numa sincronização
 VONTADES = ("ficar", "sair", "dividido")
 SISTEMA_REACAO = """Você é um jogador de futebol do elenco de um clube numa carreira de Master League do PES e manda \
 mensagem ao seu treinador por conta própria, sem ele ter perguntado. Fale em primeira pessoa, como o jogador dos fatos.
@@ -250,7 +251,9 @@ def _gravar_fala(con: sqlite3.Connection, cid: int, pid: int, texto: str, data_j
 
 def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) -> int:
     """O jogador manda mensagem por conta própria quando chega proposta por ele (com a vontade: ficar, sair ou
-    dividido) e quando ela acaba (frustração, alívio ou despedida). Só reage ao fim quem reagiu à chegada; a
+    dividido) e quando ela acaba (frustração, alívio ou despedida). No modo automático (pid None) só reage às propostas
+    que apareceram nesta sincronização e a no máximo MAX_POR_SINCRONIZACAO jogadores, os de maior valor/valor de mercado;
+    as demais ficam sem estado e só o botão (pid) as ouve. Só reage ao fim quem reagiu à chegada; a
     proposta que acabou sem reação fica calada, e a que o mesmo clube melhorou vira a reação à oferta nova.
     pid limita a um jogador. Devolve quantas mensagens mandou. Um erro da IA sobe como ia.IAIndisponivel, e o que já
     foi mandado fica gravado."""
@@ -276,7 +279,9 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
     caladas = [p for p in pendentes if ouvidas.get((p["player_id"], p["clube"]["idx"]), 0) > p["valor_bruto"]]
     pendentes = [p for p in pendentes if p not in caladas]
     melhoradas = [p for p in pendentes if abertas.get((p["player_id"], p["clube"]["idx"]), 0) > p["valor_bruto"]]
-    anterior = {(p["player_id"], p["clube"]["idx"]): p["valor"] for p in melhoradas}
+    anterior = {}
+    for p in sorted(melhoradas, key=lambda p: p["valor_bruto"]):  # várias antigas do mesmo clube: a maior fica
+        anterior[(p["player_id"], p["clube"]["idx"])] = p["valor"]
     with con:
         con.executemany("INSERT INTO vontade(carreira_id, player_id, clube_idx, valor, desfecho_avisado) "
                         "VALUES(?, ?, ?, ?, 1)", [(cid, *k(p)) for p in acabadas if k(p) not in estado])
@@ -285,7 +290,13 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
     novas, fins = {}, {}
     for p in todas:
         if p["situacao"] == "aberta" and k(p) not in estado:
+            if pid is None and p["primeira"] != s["data_jogo"]:
+                continue
             novas.setdefault(p["player_id"], []).append(p)
+    if pid is None and len(novas) > MAX_POR_SINCRONIZACAO:
+        # relevância: a maior razão valor/valor de mercado do jogador; sem mercado vem depois, pelo valor
+        peso = lambda ps: max((p["valor"] / p["valor_mercado"], p["valor"]) if p["valor_mercado"] else (0, p["valor"]) for p in ps)
+        novas = dict(sorted(novas.items(), key=lambda kv: peso(kv[1]), reverse=True)[:MAX_POR_SINCRONIZACAO])
     for p in pendentes:
         if p not in melhoradas:
             fins.setdefault(p["player_id"], []).append(p)
@@ -303,7 +314,7 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
         texto, vontade = _ouvir(con, cid, jogador, fatos)
         with con:
             _gravar_fala(con, cid, jogador, texto, s["data_jogo"])
-            con.executemany("INSERT INTO vontade(carreira_id, player_id, clube_idx, valor, vontade, fala) "
+            con.executemany("INSERT OR IGNORE INTO vontade(carreira_id, player_id, clube_idx, valor, vontade, fala) "
                             "VALUES(?, ?, ?, ?, ?, ?)", [(cid, *k(p), vontade, texto) for p in ps])
             # só agora a oferta antiga está resolvida: se a IA falhar, ela volta a valer na próxima tentativa
             con.executemany("UPDATE vontade SET desfecho_avisado = 1 WHERE carreira_id = ? AND player_id = ? "
@@ -313,7 +324,7 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
         if ps[0]["situacao"] == "saiu":  # quem saiu do elenco sai de todas as propostas de uma vez
             novo = con.execute("SELECT t.nome, v.time_idx FROM vinculo v JOIN time t ON t.carreira_id = ? AND t.idx = v.time_idx "
                                "WHERE v.sincronizacao_id = ? AND v.player_id = ?", (cid, s["id"], jogador)).fetchone()
-            # a proposta do clube novo, se houver; senão a primeira
+            # a proposta do clube novo, se houver; sem ela, nenhum valor (o de outro clube enganaria a IA)
             valor = next((p["valor"] for p in ps if novo and p["clube"]["idx"] == novo[1]), None)
             fatos = {"jogador": banco._jogador(con, cid, s, jogador)[0],
                      "despedida": _sem_nulos({"clube_novo": novo[0] if novo else None, "valor": valor})}
