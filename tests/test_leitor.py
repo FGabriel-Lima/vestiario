@@ -202,6 +202,9 @@ def test_save_real_contratos(save_atual):
 
 def test_save_real_orcamento(save_atual):
     assert save_atual.orcamento * MOEDA == 443_590_580  # "Orçam. transf." na tela do PES em 31/01/2026
+    # a fórmula foi conferida nas telas da ML04; estes valores são os que o save ML00000002 traz
+    assert save_atual.folga_salarial == 369_704
+    assert save_atual.receitas == {"tv": 399_000, "patrocinio": 269_152, "socios": 120_192, "produtos": 26_517}
 
 
 def bloco_compactado(registros: list[tuple]) -> bytes:

@@ -24,6 +24,12 @@ PID = 0x3FFFFFFF                     # bits altos do player_id são flags
 LIVRO0, LIVRO_TAM, LIVRO_N = 13_108_192, 52, 100
 MOEDA = 430                          # R$ por unidade de dinheiro do save (conferido nas telas do PES em 31/01/2026)
 ORCAMENTO = 13_098_240               # u32 orçamento de transferências (× MOEDA), fixo nos 3 saves conferidos
+# Bloco do orçamento (conferido com as telas "Relatório de orçamento" e "Saldo da conta do clube" do PES, ML04 em
+# 19/04/2026): +28 = folga anual de salários (÷ 52 = "Orç. de salário" semanal); +44/+48/+52 = TV, patrocínio e
+# sócios-torcedores da temporada; +9344 = venda de produtos (fim da lista por jogador). A bilheteria não fica gravada
+# como total (o jogo deve calcular pelo público), nem os prêmios.
+FOLGA_SALARIAL = ORCAMENTO + 28
+RECEITAS = {"tv": ORCAMENTO + 44, "patrocinio": ORCAMENTO + 48, "socios": ORCAMENTO + 52, "produtos": ORCAMENTO + 9344}
 # Bloco compactado (assinatura 20 11 09 12, fixo nos 4 saves conferidos): pedaços zlib com cabeçalho BE.
 # Descompactado, 30.001 registros de 156 bytes, um por jogador da ML (inclusive os gerados por ela).
 BLOCO0, BLOCO_REG, BLOCO_ID, BLOCO_IDADE = 18_088_888, 156, 36, 18  # idade em +18, bits 2..7
@@ -102,6 +108,8 @@ class Save:
     valores: dict[int, int] = field(default_factory=dict)  # player_id → valor de mercado (× MOEDA = R$)
     competicoes: dict[int, str] = field(default_factory=dict)  # id → nome
     propostas: list[Proposta] = field(default_factory=list)  # propostas de outros clubes por jogadores do clube
+    folga_salarial: int | None = None  # folga anual para salários (÷ 52 × MOEDA = "Orç. de salário" da tela)
+    receitas: dict[str, int] = field(default_factory=dict)  # receitas da temporada (× MOEDA), veja RECEITAS
 
 
 def _cstr(b: bytes, o: int = 0) -> str:
@@ -304,4 +312,6 @@ def ler_save(raw: bytes) -> Save:
     return Save(nome, clube, data_jogo, times, idx, elencos[idx], ler_partidas(data, len(times)),
                 ler_ids(data, len(times)), elencos, ler_negocios(data), contratos,
                 struct.unpack_from("<I", data, ORCAMENTO)[0], *ler_bloco(data), ler_competicoes(data),
-                ler_propostas(data, carreira, len(times), elencos[idx]))
+                ler_propostas(data, carreira, len(times), elencos[idx]),
+                struct.unpack_from("<I", data, FOLGA_SALARIAL)[0],
+                {k: struct.unpack_from("<I", data, o)[0] for k, o in RECEITAS.items()})

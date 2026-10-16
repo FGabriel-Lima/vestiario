@@ -275,6 +275,17 @@ def test_posicao_e_orcamento(con):
     assert banco.elenco(con, 1, 2026)[0]["posicao"] in (0, 12)
 
 
+def test_financas_como_na_tela_do_pes(con):
+    # números da ML04 em 19/04/2026: folga 33.924 → R$ 280.360 por semana; folha 7.205 → R$ 3.098.150
+    banco.gravar(con, "ML00000000", fazer_save("2026-04-19", elenco=(10, 11, 12), folga_salarial=33924,
+        contratos={10: (374_000, 0, "2028-01-31"), 11: (671, 0, "2027-01-31"), 12: (0, 0, "2026-12-31")},
+        receitas={"tv": 194298, "patrocinio": 236360, "socios": 100572, "produtos": 55193}), AGORA)
+    c = banco.carreira(con, 1)
+    assert (c["orcamento_salario"], c["folha_semanal"]) == (280_360, 3_098_150)
+    assert c["receitas"] == {"tv": 83_548_140, "patrocinio": 101_634_800, "socios": 43_245_960, "produtos": 23_732_990}
+    assert banco.fatos_do_clube(con, 1)["clube"]["folha_salarial_semanal"] == 3_098_150
+
+
 def test_banco_sem_orcamento_ganha_as_colunas_e_rele_os_saves(tmp_path):
     caminho = tmp_path / "v.db"
     banco.conectar(caminho).close()

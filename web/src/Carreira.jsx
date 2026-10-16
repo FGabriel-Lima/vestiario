@@ -201,7 +201,7 @@ export default function Carreira({ id, onVoltar }) {
               {aba === "Visão geral" && (
                 <>
                   <Atencao id={id} onFicha={setFicha} onConversar={conversar} onAba={setAba} />
-                  <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} orcamento={carreira.orcamento} dataJogo={carreira.data_jogo} />
+                  <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} carreira={carreira} dataJogo={carreira.data_jogo} />
                 </>
               )}
               {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} onFicha={setFicha} />}
@@ -287,11 +287,11 @@ const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
 const COR_RESULTADO = { V: "bg-neon text-pitch-950", E: "bg-muted text-pitch-950", D: "bg-cartao text-pitch-950" };
 const BORDA_RESULTADO = { V: "border-neon", E: "border-muted", D: "border-cartao" };
 
-function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
+function VisaoGeral({ id, ano, clube, carreira, dataJogo }) {
   const { dados: r, erro } = useDados(() => api.resumo(id, ano), [id, ano]);
   if (erro) return <Erro mensagem={erro} />;
   if (!r) return null;
-  if (r.jogos === 0) return <TemporadaPorComecar id={id} ano={ano} clube={clube} orcamento={orcamento} dataJogo={dataJogo} />;
+  if (r.jogos === 0) return <TemporadaPorComecar id={id} ano={ano} clube={clube} carreira={carreira} dataJogo={dataJogo} />;
   const aproveitamento = Math.round(((3 * r.vitorias + r.empates) / (3 * r.jogos)) * 100);
   const campanha = [
     ["vitorias", "Vitórias", r.vitorias],
@@ -331,13 +331,7 @@ function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
         </dl>
       </section>
 
-      {orcamento != null && (
-        <p className="-mt-4 mb-10 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Orçamento de transferências</span>
-          <Dinheiro valor={orcamento} className="font-kit text-3xl font-bold text-gold" />
-          <span className="text-sm text-muted">em {dataBR(dataJogo)}</span>
-        </p>
-      )}
+      <Caixa c={carreira} dataJogo={dataJogo} />
 
       <div className="mb-3 flex flex-wrap items-center gap-4">
         <h2 className="font-kit text-2xl font-semibold uppercase">Últimos resultados</h2>
@@ -355,6 +349,51 @@ function VisaoGeral({ id, ano, clube, orcamento, dataJogo }) {
       <ListaPartidas id={id} partidas={r.ultimas} clube={clube} />
       <ProximosJogos id={id} ano={ano} clube={clube} />
     </>
+  );
+}
+
+// O caixa como nas telas de orçamento do PES: os dois orçamentos, a folha por semana e o que entrou na temporada.
+// Bilheteria e prêmios ficam de fora porque o save não guarda esses totais.
+const RECEITAS = [["tv", "TV"], ["patrocinio", "Patrocínio"], ["socios", "Sócios"], ["produtos", "Produtos"]];
+
+function Caixa({ c, dataJogo }) {
+  const blocos = [
+    ["Orçamento de transferências", c.orcamento, ""],
+    ["Orçamento de salário", c.orcamento_salario, "por semana"],
+    ["Folha salarial", c.folha_semanal, "por semana"],
+  ].filter(([, v]) => v != null);
+  if (blocos.length === 0) return null;
+  return (
+    <section aria-labelledby="caixa" className="mb-10">
+      <h2 id="caixa" className="mb-3 flex flex-wrap items-baseline gap-x-3 font-kit text-2xl font-semibold uppercase">
+        Caixa
+        <span className="font-sans text-sm font-normal normal-case text-muted">em {dataBR(dataJogo)}</span>
+      </h2>
+      <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-md bg-pitch-700 sm:grid-cols-3">
+        {blocos.map(([rotulo, valor, unidade]) => (
+          <div key={rotulo} className="bg-pitch-900 px-4 py-3">
+            <dt className="text-xs uppercase text-muted">{rotulo}</dt>
+            <dd className="flex items-baseline gap-2">
+              <Dinheiro valor={valor} className="font-kit text-3xl font-bold text-gold" />
+              {unidade && <span className="text-sm text-muted">{unidade}</span>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {c.receitas && (
+        <div className="mt-3 text-sm">
+          <p className="font-kit uppercase tracking-wide text-muted">Receitas da temporada</p>
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-1 sm:flex sm:flex-wrap sm:gap-x-6">
+            {RECEITAS.filter(([k]) => c.receitas[k] != null).map(([k, rotulo]) => (
+              <li key={k}>
+                {rotulo} <Dinheiro valor={c.receitas[k]} className="font-kit text-lg font-semibold" />
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-muted">Sem bilheteria e prêmios: o save não guarda esses totais.</p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -385,20 +424,14 @@ function Posicao({ codigo, className = "" }) {
 }
 
 // Antes do primeiro jogo, aproveitamento de 0% pareceria campanha ruim: mostra o que vem pela frente
-function TemporadaPorComecar({ id, ano, clube, orcamento, dataJogo }) {
+function TemporadaPorComecar({ id, ano, clube, carreira, dataJogo }) {
   const { dados: ps } = useDados(() => api.partidas(id, ano), [id, ano]);
   const proximas = (ps ?? []).filter((p) => !p.disputada).slice(0, 5);
   return (
     <>
       <p className="mb-2 font-kit text-sm uppercase tracking-[0.2em] text-muted">Temporada {ano}</p>
       <p className="mb-8 font-kit text-5xl font-extrabold uppercase leading-none">Ainda não começou</p>
-      {orcamento != null && (
-        <p className="mb-10 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="font-kit text-sm uppercase tracking-[0.2em] text-muted">Orçamento de transferências</span>
-          <Dinheiro valor={orcamento} className="font-kit text-3xl font-bold text-gold" />
-          <span className="text-sm text-muted">em {dataBR(dataJogo)}</span>
-        </p>
-      )}
+      <Caixa c={carreira} dataJogo={dataJogo} />
       {proximas.length > 0 && (
         <>
           <h2 className="mb-3 font-kit text-2xl font-semibold uppercase">Próximos jogos</h2>

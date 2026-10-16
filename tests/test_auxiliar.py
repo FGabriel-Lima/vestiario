@@ -31,7 +31,8 @@ def test_fatos_da_proposta_so_com_dados_existentes(con):
     assert j["temporada"] == {"jogos": 1, "gols": 1, "assistencias": 0, "jogos_do_clube": 2, "minutos_jogados": 90,
                               "nota_media": 6.0}
     assert f["elenco_na_mesma_posicao"] == [{"nome": "Outro Zagueiro", "idade": 24}]
-    assert f["clube"] == {"nome": "Clube A", "orcamento_de_transferencias": 87333 * MOEDA, "data_no_jogo": "2026-03-01"}
+    assert f["clube"] == {"nome": "Clube A", "orcamento_de_transferencias": 87333 * MOEDA,
+                          "folha_salarial_semanal": 16182 // 52 * MOEDA, "data_no_jogo": "2026-03-01"}
     assert "dados_que_nao_temos" not in f
     assert banco.fatos_da_proposta(con, 1, 10, 1, 999) is None  # proposta que não existe
 

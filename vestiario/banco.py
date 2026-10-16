@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS carreira(
 CREATE TABLE IF NOT EXISTS sincronizacao(
   id INTEGER PRIMARY KEY, carreira_id INTEGER NOT NULL REFERENCES carreira,
   em TEXT NOT NULL, data_jogo TEXT NOT NULL, clube_idx INTEGER NOT NULL, clube_nome TEXT NOT NULL,
-  orcamento INTEGER);
+  orcamento INTEGER, folga_salarial INTEGER, receitas TEXT);
 CREATE TABLE IF NOT EXISTS elenco(
   sincronizacao_id INTEGER NOT NULL REFERENCES sincronizacao, player_id INTEGER NOT NULL, idade INTEGER,
   valor INTEGER);
@@ -125,6 +125,11 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
         with con:  # banco anterior ao orçamento: relê os saves para preenchê-lo
             con.execute("ALTER TABLE sincronizacao ADD COLUMN orcamento INTEGER")
             con.execute("DELETE FROM arquivo")
+    if "receitas" not in {r[1] for r in con.execute("PRAGMA table_info(sincronizacao)")}:
+        with con:  # banco anterior ao orçamento de salário e às receitas: relê os saves
+            con.execute("ALTER TABLE sincronizacao ADD COLUMN folga_salarial INTEGER")
+            con.execute("ALTER TABLE sincronizacao ADD COLUMN receitas TEXT")
+            con.execute("DELETE FROM arquivo")
     if "pes_id" not in {r[1] for r in con.execute("PRAGMA table_info(time)")}:
         with con:  # banco anterior aos escudos: ganha a coluna e relê todos os saves para preenchê-la
             con.execute("ALTER TABLE time ADD COLUMN pes_id INTEGER")
@@ -187,10 +192,10 @@ def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict
         ultima = con.execute("SELECT max(data_jogo) FROM sincronizacao WHERE carreira_id = ?", (cid,)).fetchone()[0]
         mais_recente = ultima is None or save.data_jogo.isoformat() >= ultima
         sid = con.execute(
-            "INSERT INTO sincronizacao(carreira_id, em, data_jogo, clube_idx, clube_nome, orcamento) "
-            "VALUES(?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO sincronizacao(carreira_id, em, data_jogo, clube_idx, clube_nome, orcamento, folga_salarial, "
+            "receitas) VALUES(?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
             (cid, em.isoformat(timespec="seconds"), save.data_jogo.isoformat(), save.clube_idx, save.clube,
-             save.orcamento),
+             save.orcamento, save.folga_salarial, json.dumps(save.receitas) if save.receitas else None),
         ).fetchone()[0]
         con.executemany("INSERT INTO elenco VALUES(?, ?, ?, ?)",
                         [(sid, p, save.idades.get(p), save.valores.get(p)) for p in save.elenco])
@@ -283,7 +288,17 @@ def carreira(con: sqlite3.Connection, cid: int) -> dict | None:
                     "WHERE t.carreira_id = ? AND t.idx = ?", (cid, s["clube_idx"])).fetchone()
     return {"id": cid, "clube_nome": s["clube_nome"], "clube_idx": s["clube_idx"], "data_jogo": s["data_jogo"],
             "escudo": t["pes_id"] if t else None, "cores": t["cores"].split() if t and t["cores"] else [],
-            "orcamento": s["orcamento"] * MOEDA if s["orcamento"] is not None else None}
+            "orcamento": s["orcamento"] * MOEDA if s["orcamento"] is not None else None, **financas(con, s)}
+
+
+def financas(con: sqlite3.Connection, s: sqlite3.Row) -> dict:
+    """Orçamento de salário e folha por semana, como na tela do PES, e as receitas da temporada, em R$. A folha é a
+    soma dos salários anuais ÷ 52 (bate com o "Salário semanal" da tela); emprestado não tem salário no save."""
+    anual = con.execute("SELECT sum(salario_anual) FROM contrato WHERE sincronizacao_id = ? AND emprestimo = 0",
+                        (s["id"],)).fetchone()[0]
+    return {"orcamento_salario": s["folga_salarial"] // 52 * MOEDA if s["folga_salarial"] is not None else None,
+            "folha_semanal": anual // 52 * MOEDA if anual else None,
+            "receitas": {k: v * MOEDA for k, v in json.loads(s["receitas"]).items()} if s["receitas"] else None}
 
 
 def escudos(con: sqlite3.Connection) -> set[int]:
@@ -582,10 +597,17 @@ def _colegas(con: sqlite3.Connection, s: sqlite3.Row, pid: int, posicao: int | N
         "WHERE e.sincronizacao_id = ? AND j.posicao = ? AND e.player_id <> ? ORDER BY j.nome", (s["id"], posicao, pid))]
 
 
-def _clube(s: sqlite3.Row) -> dict:
+def _clube(con: sqlite3.Connection, s: sqlite3.Row) -> dict:
     clube = {"nome": s["clube_nome"]}
     if s["orcamento"] is not None:
         clube["orcamento_de_transferencias"] = s["orcamento"] * MOEDA
+    f = financas(con, s)
+    if f["orcamento_salario"] is not None:
+        clube["orcamento_de_salario_semanal"] = f["orcamento_salario"]
+    if f["folha_semanal"]:
+        clube["folha_salarial_semanal"] = f["folha_semanal"]
+    if f["receitas"]:
+        clube["receitas_da_temporada_sem_bilheteria_e_premios"] = f["receitas"]
     clube["data_no_jogo"] = s["data_jogo"]
     return clube
 
@@ -607,7 +629,7 @@ def fatos_da_proposta(con: sqlite3.Connection, cid: int, pid: int, clube_idx: in
     interessado = con.execute("SELECT nome FROM time WHERE carreira_id = ? AND idx = ?", (cid, clube_idx)).fetchone()
     jogador, posicao = _jogador(con, cid, s, pid)
     return {"proposta": {"clube_interessado": interessado[0] if interessado else None, "valor_oferecido": valor * MOEDA},
-            "jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(s),
+            "jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(con, s),
             **_ausentes(jogador)}
 
 
@@ -638,7 +660,7 @@ def fatos_do_jogador(con: sqlite3.Connection, cid: int, pid: int) -> dict | None
     abertas = [{"clube": x["clube"]["nome"], "valor": x["valor"]} for x in propostas(con, cid)
                if x["player_id"] == pid and x["situacao"] == "aberta"]
     proximo = next((p for p in partidas(con, cid) if not p["disputada"] and p["data"] > s["data_jogo"]), None)
-    fatos = {"jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(s)}
+    fatos = {"jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(con, s)}
     if abertas:
         fatos["propostas_abertas"] = abertas
     if feitas := promessas(con, cid, pid):
@@ -771,7 +793,7 @@ def fatos_do_clube(con: sqlite3.Connection, cid: int) -> dict:
         pro, contra = _placar(p, clube)
         ultimos.append({**_adversario(p, clube), "placar": f"{pro} x {contra}",
                         "resultado": "vitória" if pro > contra else "derrota" if pro < contra else "empate"})
-    fatos = {"clube": _clube(s), "elenco": elenco, "classificacao": classificacao, "ultimos_jogos": ultimos,
+    fatos = {"clube": _clube(con, s), "elenco": elenco, "classificacao": classificacao, "ultimos_jogos": ultimos,
              "proximos_jogos": [_adversario(p, clube) for p in todas if not p["disputada"] and p["data"] > ate][:3],
              "propostas_abertas": [{"clube": x["clube"]["nome"], "jogador": x["nome"], "valor": x["valor"]}
                                    for x in propostas(con, cid) if x["situacao"] == "aberta"],
