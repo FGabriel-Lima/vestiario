@@ -196,3 +196,194 @@ def descrever(item: dict, valor: int | None = None) -> str:
     if t == "folha_maxima":
         return f"folha semanal de até {_dinheiro(reais(x))}"
     return f"vender {v} dos 5 maiores salários até 30/09"
+
+
+def _evento(con: sqlite3.Connection, cid: int, clube: int, chave: str, data_jogo: str, motivo: str,
+            variacao: int) -> bool:
+    """Grava um evento de confiança uma vez só (a chave não se repete). Devolve se gravou."""
+    return con.execute("INSERT OR IGNORE INTO confianca VALUES(?, ?, ?, ?, ?, ?)",
+                       (cid, clube, chave, data_jogo, motivo, variacao)).rowcount == 1
+
+
+def confianca(con: sqlite3.Connection, cid: int, clube: int) -> int:
+    """Soma dos eventos a partir de 60, presa entre 0 e 100 a cada passo."""
+    v = INICIAL
+    for (d,) in con.execute("SELECT variacao FROM confianca WHERE carreira_id = ? AND clube_idx = ? ORDER BY rowid",
+                            (cid, clube)):
+        v = min(100, max(0, v + d))
+    return v
+
+
+def historico(con: sqlite3.Connection, cid: int, clube: int) -> list[dict]:
+    return [{"data_jogo": r[0], "motivo": r[1], "variacao": r[2]} for r in con.execute(
+        "SELECT data_jogo, motivo, variacao FROM confianca WHERE carreira_id = ? AND clube_idx = ? ORDER BY rowid DESC",
+        (cid, clube))]
+
+
+def _janela_de(data: str) -> int:
+    return 1 if data[5:7] <= "06" else 2
+
+
+def mercado(con: sqlite3.Connection, cid: int, clube: int, ano: int) -> tuple[list[dict], list[dict]]:
+    """Chegadas e saídas do ano, pela aba Transferências. A janela (1 = janeiro a junho, 2 = julho a dezembro) é a da
+    sincronização em que o negócio apareceu; o valor é em R$ (negativo = o clube pagou; None = sem negócio no livro);
+    empréstimo = a chegada teve contrato de empréstimo em alguma sincronização do ano."""
+    emprestados = {r[0] for r in con.execute(
+        "SELECT DISTINCT c.player_id FROM contrato c JOIN sincronizacao s ON s.id = c.sincronizacao_id WHERE "
+        "s.carreira_id = ? AND s.clube_idx = ? AND c.emprestimo = 1 AND substr(s.data_jogo, 1, 4) = ?",
+        (cid, clube, str(ano)))}
+    chegadas, saidas = [], []
+    for j in banco.transferencias(con, cid)["janelas"]:
+        if j["ate"][:4] != str(ano):
+            continue
+        janela = _janela_de(j["ate"])
+        chegadas += [{"player_id": x["player_id"], "nome": x["nome"], "janela": janela, "valor": x["valor"],
+                      "emprestimo": x["player_id"] in emprestados} for x in j["chegaram"]]
+        saidas += [{"player_id": x["player_id"], "nome": x["nome"], "janela": janela, "valor": x["valor"]}
+                   for x in j["sairam"]]
+    return chegadas, saidas
+
+
+def fase_na_copa(con: sqlite3.Connection, cid: int, clube: int, chave: str) -> tuple[int, bool]:
+    """(fase mais longe que o clube alcançou, foi eliminado?) numa edição de copa. 0 = fase inicial (grupos ou fases
+    antes das oitavas), 1 = oitavas, 2 = quartas, 3 = semifinal, 4 = final, 5 = título."""
+    e = banco.edicao(con, cid, chave)
+    if e is None:
+        return 0, False
+    if e["campeao"] and e["campeao"]["idx"] == clube:
+        return 5, False
+    alcancada, eliminado = 0, False
+    for col in e["chaveamento"]:
+        for c in col["confrontos"]:
+            nosso = next((t for t in c["times"] if t["idx"] == clube), None)
+            if nosso:
+                alcancada = max(alcancada, ORDEM_FASE.get(col["titulo"], 0))
+                eliminado = eliminado or (any(t["vencedor"] for t in c["times"]) and not nosso["vencedor"])
+    for f in e["fases"]:
+        for g in f.get("grupos", []):
+            eliminado = eliminado or any(l["idx"] == clube and l.get("avancou") is False for l in g["linhas"])
+    return alcancada, eliminado
+
+
+def _uso(item: dict) -> str:
+    """O andamento do item em poucas palavras, para a tela e para a IA."""
+    d, t, v = item["detalhe"], item["tipo"], item["valor"]
+    if t == "meta_liga" and d.get("posicao"):
+        return f"{d['posicao']}º agora ({d['rodadas_jogadas']} de {d['rodadas_total']} rodadas)"
+    if t == "meta_copa":
+        return f"até agora: {d['fase']}"
+    if t == "contratacoes":
+        return f"{d['usadas']} de {v} usadas"
+    if t in ("livres", "emprestimos"):
+        return f"{d['usados']} de {v} usados"
+    if t == "teto_contratacao":
+        return f"maior compra: {_dinheiro(d['maior'])}" if d["maior"] else "nenhuma compra"
+    if t == "vender_para_comprar":
+        return f"vendas {_dinheiro(d['vendas'])} · compras {_dinheiro(d['gastos'])}"
+    if t == "folha_maxima":
+        return f"folha agora: {_dinheiro(d['folha'])}" if d["folha"] else ""
+    if t == "vender_salarios":
+        return f"{d['vendidos']} de {v} vendidos"
+    return ""
+
+
+def avaliar(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str, registrar: bool = True,
+            balanco: bool = False) -> list[dict]:
+    """O estado de cada item do acordo, com o detalhe dos números (spec, seção 2). Com registrar, grava os eventos
+    de quebra e de meta em risco (só com o acordo assinado ou imposto). Com balanco, as metas e o vender_para_comprar
+    ganham o resultado final do ano."""
+    clube, ano = acordo["clube_idx"], acordo["ano"]
+    vale = registrar and acordo["estado"] in ("assinado", "imposto")
+    chegadas, saidas = mercado(con, cid, clube, ano)
+    liga, _ = competicoes_do_ano(con, cid, ano, clube)
+    s = banco._ultima(con, cid)
+    elenco = {r[0] for r in con.execute("SELECT player_id FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
+    folha = banco.financas(con, s)["folha_semanal"]
+    compras = [-c["valor"] for c in chegadas if c["valor"] and c["valor"] < 0]
+    gastos, vendas = sum(compras), sum(x["valor"] for x in saidas if x["valor"] and x["valor"] > 0)
+
+    def quebra(chave, motivo, variacao):
+        if vale:
+            _evento(con, cid, clube, f"quebra:{chave}", hoje, motivo, variacao)
+
+    resultado = []
+    for item in acordo["itens"]:
+        t, v = item["tipo"], item["valor"]
+        estado, detalhe = "em_dia", {}
+        if t == "meta_liga":
+            pos = liga["posicao"] if liga else None
+            detalhe = {"posicao": pos, "rodadas_jogadas": liga["rodadas_jogadas"] if liga else 0,
+                       "rodadas_total": liga["rodadas_total"] if liga else 0}
+            if balanco:
+                estado = "cumprido" if pos is not None and pos <= v else "nao_cumprido"
+            elif pos is not None and liga["rodadas_jogadas"] * 3 >= liga["rodadas_total"] and pos > v + 3:
+                estado = "em_risco"
+                if vale:
+                    _evento(con, cid, clube, f"risco:meta_liga:{hoje[:7]}", hoje,
+                            f"Meta da liga em risco ({pos}º, meta de {v}º)", -5)
+        elif t == "meta_copa":
+            alcancada, eliminado = fase_na_copa(con, cid, clube, item["chave"])
+            detalhe = {"fase": FASES_COPA[alcancada]}
+            if alcancada >= v:
+                estado = "cumprido"
+            elif eliminado:
+                estado = "nao_cumprido"
+        elif t == "contratacoes":
+            usadas = sum(c["janela"] == item["janela"] for c in chegadas)
+            detalhe = {"usadas": usadas}
+            if usadas > v:
+                estado = "quebrado"
+                quebra(f"contratacoes:{ano}:{item['janela']}",
+                       f"Contratações além do limite na janela {JANELA[item['janela']]} ({usadas} de {v})", -15)
+            elif usadas and usadas >= v - 1:
+                estado = "em_risco"
+        elif t == "teto_contratacao":
+            teto = reais(item)
+            detalhe = {"maior": max(compras, default=0), "teto": teto}
+            acima = [c for c in chegadas if c["valor"] and -c["valor"] > teto]
+            if acima:
+                estado = "quebrado"
+                for janela in sorted({c["janela"] for c in acima}):
+                    nomes = ", ".join(c["nome"] for c in acima if c["janela"] == janela)
+                    quebra(f"teto_contratacao:{ano}:{janela}", f"Compra acima do teto de {_dinheiro(teto)} ({nomes})", -10)
+        elif t == "vender_para_comprar":
+            detalhe = {"gastos": gastos, "vendas": vendas}
+            if gastos and vendas * 100 < v * gastos:
+                estado = "quebrado" if balanco else "em_risco"
+                if balanco:
+                    quebra(f"vender_para_comprar:{ano}", f"As vendas pagaram menos de {v}% das compras", -15)
+            elif balanco:
+                estado = "cumprido"
+        elif t in ("livres", "emprestimos"):
+            n = sum(c["emprestimo"] if t == "emprestimos" else (c["valor"] is None and not c["emprestimo"])
+                    for c in chegadas)
+            detalhe = {"usados": n}
+            if n > v:
+                estado = "quebrado"
+                rotulo = "Empréstimos de entrada" if t == "emprestimos" else "Agentes livres"
+                quebra(f"{t}:{ano}", f"{rotulo} além do limite ({n} de {v})", -15)
+            elif n and n == v:
+                estado = "em_risco"
+        elif t == "folha_maxima":
+            teto = reais(item)
+            detalhe = {"folha": folha, "teto": teto}
+            if folha and folha > teto:
+                estado = "quebrado"
+                quebra(f"folha_maxima:{ano}:{_janela_de(hoje)}",
+                       f"Folha semanal de {_dinheiro(folha)}, acima de {_dinheiro(teto)}", -10)
+            elif folha and folha > 0.95 * teto:
+                estado = "em_risco"
+        elif t == "vender_salarios":
+            vendidos = [p for p in item["jogadores"] if p not in elenco]
+            detalhe = {"vendidos": len(vendidos)}
+            if len(vendidos) >= v:
+                estado = "cumprido"
+            elif balanco or hoje > f"{ano}-09-30":
+                estado = "quebrado"
+                quebra(f"vender_salarios:{ano}", f"Não vendeu {v} dos 5 maiores salários até 30/09", -15)
+            else:
+                estado = "em_risco"
+        feito = {**item, "estado": estado, "detalhe": detalhe, "descricao": descrever(item)}
+        feito["uso"] = _uso(feito)
+        resultado.append(feito)
+    return resultado

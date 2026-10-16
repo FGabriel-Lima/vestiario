@@ -123,3 +123,75 @@ def test_descricao_dos_itens():
     assert "Copa Libertadores: chegar às quartas de final" in textos
     assert "vender 1 dos 5 maiores salários até 30/09" in textos
     assert diretoria._dinheiro(38_009_850) == "R$ 38 mi" and diretoria._dinheiro(1_250_000) == "R$ 1,2 mi"
+
+
+def acordo_de_teste(itens, estado="assinado", ano=2026):
+    return {"clube_idx": 0, "ano": ano, "estado": estado, "itens": itens}
+
+
+def test_confianca_soma_presa_e_sem_repetir(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    assert diretoria.confianca(con, 1, 0) == 60
+    for i in range(5):
+        diretoria._evento(con, 1, 0, f"x{i}", "2026-01-10", "teste", -20)
+    assert diretoria._evento(con, 1, 0, "x0", "2026-01-10", "teste", -20) is False
+    assert diretoria.confianca(con, 1, 0) == 0
+    diretoria._evento(con, 1, 0, "y", "2026-01-11", "teste", 10)
+    assert diretoria.confianca(con, 1, 0) == 10  # presa em 0 antes de subir
+    assert diretoria.historico(con, 1, 0)[0] == {"data_jogo": "2026-01-11", "motivo": "teste", "variacao": 10}
+
+
+def mercado_movimentado(con):
+    """13 comprado por 1.000, 14 sem negócio (agente livre), 15 emprestado; 11 vendido por 300."""
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    sincronizar(con, "2026-02-01", temporada(2026, 0), elenco=(10, 12, 13, 14, 15),
+                negocios=[(13, -1000, 1), (11, 300, 5)], contratos={15: (0, 0, "2026-12-31", True)})
+
+
+def test_mercado_do_ano(con):
+    mercado_movimentado(con)
+    chegadas, saidas = diretoria.mercado(con, 1, 0, 2026)
+    assert sorted((c["player_id"], c["janela"], c["valor"], c["emprestimo"]) for c in chegadas) == [
+        (13, 1, -1000 * MOEDA, False), (14, 1, None, False), (15, 1, None, True)]
+    assert [(s["player_id"], s["valor"]) for s in saidas] == [(11, 300 * MOEDA)]
+
+
+def test_itens_quebrados_tiram_confianca_uma_vez(con):
+    mercado_movimentado(con)
+    itens = [diretoria._item("contratacoes", 2, janela=1), diretoria._item("teto_contratacao", 10, orcamento=1_000_000),
+             diretoria._item("livres", 1), diretoria._item("emprestimos", 0), diretoria._item("vender_para_comprar", 50)]
+    r = {i["tipo"]: i for i in diretoria.avaliar(con, 1, acordo_de_teste(itens), "2026-02-01")}
+    assert (r["contratacoes"]["estado"], r["contratacoes"]["detalhe"]) == ("quebrado", {"usadas": 3})
+    assert r["teto_contratacao"]["estado"] == "quebrado"  # 430 mil > 100 mil
+    assert (r["livres"]["estado"], r["emprestimos"]["estado"]) == ("em_risco", "quebrado")
+    assert r["vender_para_comprar"]["estado"] == "em_risco"  # 129 mil de vendas < 50% de 430 mil
+    assert r["contratacoes"]["uso"] == "3 de 2 usadas"
+    assert diretoria.confianca(con, 1, 0) == 60 - 15 - 10 - 15
+    diretoria.avaliar(con, 1, acordo_de_teste(itens), "2026-02-01")
+    assert diretoria.confianca(con, 1, 0) == 20  # a mesma quebra não conta duas vezes
+
+
+def test_acordo_proposto_nao_gera_eventos(con):
+    mercado_movimentado(con)
+    r = diretoria.avaliar(con, 1, acordo_de_teste([diretoria._item("contratacoes", 1, janela=1)], estado="proposto"),
+                          "2026-02-01")
+    assert r[0]["estado"] == "quebrado" and diretoria.confianca(con, 1, 0) == 60
+
+
+def test_folha_e_venda_de_salarios(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0),
+                contratos={10: (52_000, 0, "2028-01-31"), 11: (5_200, 0, "2028-01-31")})
+    itens = [diretoria._item("folha_maxima", 90, folha=1100 * MOEDA),
+             diretoria._item("vender_salarios", 1, jogadores=[10, 11])]
+    r = {i["tipo"]: i for i in diretoria.avaliar(con, 1, acordo_de_teste(itens), "2026-01-10")}
+    assert r["folha_maxima"]["estado"] == "quebrado"  # 1.100 × 430 por semana, acima de 90% disso
+    assert r["vender_salarios"]["estado"] == "em_risco"
+    r = {i["tipo"]: i for i in diretoria.avaliar(con, 1, acordo_de_teste(itens), "2026-10-01")}
+    assert r["vender_salarios"]["estado"] == "quebrado"  # passou de 30/09 sem vender
+
+
+def test_meta_da_liga_no_balanco(con):
+    sincronizar(con, "2026-06-01", temporada(2026, 4))  # A: 1º com 6 pontos
+    itens = [diretoria._item("meta_liga", 1)]
+    r = diretoria.avaliar(con, 1, acordo_de_teste(itens), "2026-06-01", registrar=False, balanco=True)
+    assert (r[0]["estado"], r[0]["detalhe"]["posicao"]) == ("cumprido", 1)
