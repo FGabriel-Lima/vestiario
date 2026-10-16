@@ -102,3 +102,20 @@ def test_coletiva_do_ultimo_jogo_vira_post_do_ge(con, monkeypatch):
     assert post["dados"]["entrevista"] == [{"pergunta": perguntas[0], "resposta": "Vencemos com autoridade."},
                                            {"pergunta": perguntas[2], "resposta": "Agora é o Clube A."}]
     assert post["legenda"] == '"Vencemos com autoridade.", disse o técnico do Clube A depois do jogo.'
+
+
+def test_posts_da_diretoria(con):
+    from vestiario import diretoria
+    diretoria._evento(con, 1, 0, "quebra:contratacoes:2026:1", "2026-02-03", "Contratações além do limite", -15)
+    diretoria._evento(con, 1, 0, "demissao:2026-01-30", "2026-02-03", "Demitido: ultimato não cumprido", 0)
+    con.execute("INSERT INTO acordo(carreira_id, clube_idx, ano, estado, itens, perfil, data_jogo, assinado_data) "
+                "VALUES(1, 0, 2026, 'assinado', ?, '{}', '2026-01-25', '2026-01-25')",
+                ('[{"tipo": "livres", "valor": 1, "base": 1}]',))
+    posts = feed.posts_do_periodo(con, 1)
+    tipos = [(p["perfil"], p["tipo"]) for p in posts]
+    for esperado in [("geglobo", "diretoria_insatisfeita"), ("clube", "demissao"), ("geglobo", "demissao"),
+                     ("clube", "acordo")]:
+        assert esperado in tipos
+    acordo = next(p for p in posts if p["tipo"] == "acordo")
+    assert acordo["dados"] == {"ano": 2026, "imposto": False, "exigencias": ["até 1 agente livre no ano"]}
+    assert feed.legenda_padrao(next(p for p in posts if p["tipo"] == "demissao")) == "Demitido: ultimato não cumprido."

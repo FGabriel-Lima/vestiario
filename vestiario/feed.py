@@ -6,7 +6,7 @@ import sqlite3
 import unicodedata
 from datetime import date, datetime
 
-from . import banco, ia
+from . import banco, diretoria, ia
 from .leitor import MOEDA
 
 # @ oficiais conhecidos; os outros clubes saem do nome (sem acento e espaço)
@@ -113,6 +113,31 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
             post("clube", "titulo" if t["campeao"]["idx"] == clube else "vice", t["fim"],
                  {"competicao": t["nome"], "temporada": t["temporada"], "campeao": t["campeao"], "vice": t["vice"]})
 
+    # diretoria: os eventos de confiança do período (gravados na data da sincronização em que aconteceram) e o acordo
+    # assinado ou imposto, uma vez por ano
+    eventos = con.execute("SELECT chave, data_jogo, motivo, variacao FROM confianca WHERE carreira_id = ? AND "
+                          "clube_idx = ? AND data_jogo <= ? AND (? IS NULL OR data_jogo > ?) ORDER BY rowid",
+                          (cid, clube, ate, de, de)).fetchall()
+    for chave, data, motivo, variacao in eventos:
+        if chave.startswith("quebra:"):
+            post("geglobo", "diretoria_insatisfeita", data, {"motivo": motivo})
+        elif chave.startswith("ultimato:inicio"):
+            post("geglobo", "ultimato", data, {"motivo": motivo})
+        elif chave.startswith("demissao:"):
+            post("clube", "demissao", data, {"motivo": motivo})
+            post("geglobo", "demissao", data, {"motivo": motivo})
+        elif chave.startswith("balanco:meta_liga"):
+            post("geglobo", "balanco", data, {"motivo": motivo, "variacao": variacao})
+    anunciados = {json.loads(r[0]).get("ano") for r in con.execute(
+        "SELECT dados FROM post WHERE carreira_id = ? AND tipo = 'acordo'", (cid,))}
+    for ano, estado, itens, assinado in con.execute(
+            "SELECT ano, estado, itens, assinado_data FROM acordo WHERE carreira_id = ? AND clube_idx = ? AND "
+            "assinado_data IS NOT NULL AND assinado_data <= ? AND (? IS NULL OR assinado_data >= ?)",
+            (cid, clube, ate, de, de)).fetchall():
+        if ano not in anunciados:
+            post("clube", "acordo", assinado, {"ano": ano, "imposto": estado == "imposto",
+                                               "exigencias": [diretoria.descrever(i) for i in json.loads(itens)]})
+
     if proximo := next((p for p in todas if not p["disputada"] and p["data"] > ate), None):
         post("clube", "proximo_jogo", ate, {"competicao": proximo["competicao"], "data": proximo["data"],
                                             "mandante": _time(proximo, "mandante"), "visitante": _time(proximo, "visitante")})
@@ -134,6 +159,9 @@ Cada post já tem o perfil que publica, o tipo e os fatos. Escreva uma legenda p
 - "geglobo": portal de notícias. Tom jornalístico: "INFORMAÇÃO", "o ge apurou", proposta recebida, contrato vencendo.
 - "mercadodabola": perfil de mercado. Curto, começa com "Tá fechado! ✅" quando a transferência está concluída.
   Nos posts "mundo" o valor pago é desconhecido: cite só o valor de mercado, nunca como preço da transferência.
+- Posts da diretoria ("acordo", "diretoria_insatisfeita", "ultimato", "demissao", "balanco"): a relação do técnico
+  com a diretoria, só com o "motivo" e as "exigencias" dos fatos. O perfil oficial anuncia o acordo da temporada e a
+  saída do técnico com sobriedade; o ge noticia a insatisfação, o ultimato, a demissão e o balanço.
 
 Regras, sem exceção:
 - Use SOMENTE os fatos de cada post. Não cite pessoas, clubes, números, lesões, declarações, bastidores, intenções
@@ -173,6 +201,10 @@ def legenda_padrao(post: dict) -> str:
         return f"INFORMAÇÃO: {d['clube']['nome']} fez proposta por {d['nome']}."
     if t == "contratos":
         return "Contratos que vencem nos próximos meses: " + ", ".join(j["nome"] for j in d["jogadores"]) + "."
+    if t == "acordo":
+        return f"Diretoria e comissão técnica alinhadas para {d['ano']}."
+    if t in ("diretoria_insatisfeita", "ultimato", "demissao", "balanco"):
+        return f"{d['motivo']}."
     return f"{d.get('competicao', '')} {d.get('temporada', '')}".strip()
 
 
