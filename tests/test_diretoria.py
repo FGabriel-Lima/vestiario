@@ -195,3 +195,76 @@ def test_meta_da_liga_no_balanco(con):
     itens = [diretoria._item("meta_liga", 1)]
     r = diretoria.avaliar(con, 1, acordo_de_teste(itens), "2026-06-01", registrar=False, balanco=True)
     assert (r[0]["estado"], r[0]["detalhe"]["posicao"]) == ("cumprido", 1)
+
+
+def test_reuniao_pendente_e_acordo_imposto_no_primeiro_jogo(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    a = diretoria._acordo(con, 1, 0, 2026)
+    assert a["estado"] == "proposto" and a["perfil"]["porte"] == "grande" and a["revisao_feita"] == 0
+    assert [p["tipo"] for p in diretoria.pendencias(con, 1)] == ["reuniao"]
+    sincronizar(con, "2026-02-15", temporada(2026, 1))  # o 1º jogo da liga foi em 10/02
+    diretoria.atualizar(con, 1)
+    a = diretoria._acordo(con, 1, 0, 2026)
+    assert (a["estado"], a["assinado_data"]) == ("imposto", "2026-02-15")
+    assert diretoria.confianca(con, 1, 0) == 55
+    diretoria.atualizar(con, 1)
+    assert diretoria.confianca(con, 1, 0) == 55  # imposto uma vez só
+
+
+def test_balanco_no_fim_da_liga(con):
+    sincronizar(con, "2026-06-30", temporada(2026, 4))  # liga toda disputada: A em 1º
+    diretoria.atualizar(con, 1)
+    a = diretoria._acordo(con, 1, 0, 2026)
+    assert a["estado"] == "encerrado" and a["balanco"]["metas"] == {"meta_liga": "cumprido"}
+    # sem imposição (o acordo nasceu depois do 1º jogo e ganha 30 dias); a meta de 3º foi cumprida: +15
+    assert diretoria.confianca(con, 1, 0) == 60 + 15
+    sincronizar(con, "2027-01-10", temporada(2026, 4) + temporada(2027, 0))
+    diretoria.atualizar(con, 1)
+    assert diretoria._acordo(con, 1, 0, 2027)["perfil"]["momento"] == "cumpriu"
+
+
+def test_virada_do_ano_fecha_o_acordo_anterior(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    sincronizar(con, "2027-01-05", temporada(2026, 2) + temporada(2027, 0))
+    diretoria.atualizar(con, 1)
+    assert diretoria._acordo(con, 1, 0, 2026)["estado"] == "encerrado"
+    assert diretoria._acordo(con, 1, 0, 2027)["estado"] == "proposto"
+
+
+def jogos_do_ultimato(resultados):
+    """5 jogos A x B em março; `resultados` = placares dos que já foram disputados."""
+    return [jogo(f"2026-03-0{i + 1}", 0, 1, resultados[i] if i < len(resultados) else (0, 0), rodada=i,
+                 disputada=i < len(resultados)) for i in range(5)]
+
+
+def ultimato_aberto(con):
+    sincronizar(con, "2026-02-20", jogos_do_ultimato([]))
+    diretoria.atualizar(con, 1)
+    diretoria._evento(con, 1, 0, "teste", "2026-02-20", "teste", -50)
+    diretoria.atualizar(con, 1)
+    assert diretoria.pendencias(con, 1)[-1]["tipo"] == "ultimato"
+
+
+def test_ultimato_cumprido_volta_a_30(con):
+    ultimato_aberto(con)
+    sincronizar(con, "2026-03-04", jogos_do_ultimato([(1, 0), (1, 0), (1, 1)]))  # 7 pontos
+    diretoria.atualizar(con, 1)
+    assert diretoria.confianca(con, 1, 0) == 30 and diretoria.demitido(con, 1, 0) is None
+
+
+def test_ultimato_falhado_demite(con):
+    ultimato_aberto(con)
+    sincronizar(con, "2026-03-04", jogos_do_ultimato([(0, 1), (0, 1), (0, 1)]))  # 0 pontos, faltam 2 jogos
+    diretoria.atualizar(con, 1)
+    assert diretoria.demitido(con, 1, 0) == "2026-03-04"
+    assert [p["tipo"] for p in diretoria.pendencias(con, 1)] == ["demissao"]
+
+
+def test_cinco_derrotas_seguidas(con):
+    sincronizar(con, "2026-01-01", jogos_do_ultimato([]))
+    diretoria.atualizar(con, 1)
+    sincronizar(con, "2026-03-06", jogos_do_ultimato([(0, 1)] * 5))
+    diretoria.atualizar(con, 1)
+    assert any(h["motivo"] == "5 derrotas seguidas" for h in diretoria.historico(con, 1, 0))

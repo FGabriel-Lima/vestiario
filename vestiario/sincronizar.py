@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from . import banco, conversas, feed, ia, leitor, patch
+from . import banco, conversas, diretoria, feed, ia, leitor, patch
 
 
 def _faltam(pasta: Path, ids: set[int]) -> set[int]:
@@ -80,6 +80,10 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pas
     # a cada carreira que mudou: os jogadores falam das propostas por eles e o feed sai (chamadas à IA)
     for cid in dict.fromkeys(r["carreira_id"] for r in resultados if r.get("status") == "ok"):
         nome = next(r["carreira"] for r in resultados if r.get("carreira_id") == cid)
+        try:
+            diretoria.atualizar(con, cid)
+        except Exception as e:  # fronteira: um erro da diretoria nunca derruba a sincronização
+            avisos.append(f"Diretoria de {nome} não atualizada ({e}).")
         try:
             conversas.reagir_propostas(con, cid)
         except ia.IAIndisponivel as e:

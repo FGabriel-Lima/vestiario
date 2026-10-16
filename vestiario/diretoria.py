@@ -387,3 +387,186 @@ def avaliar(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str, registra
         feito["uso"] = _uso(feito)
         resultado.append(feito)
     return resultado
+
+
+TITULOS_GRANDES = {"Brasileirão Série A", "Copa Libertadores", "Copa do Brasil"}
+
+
+def _data(iso: str) -> str:
+    return "/".join(reversed(iso[:10].split("-")))
+
+
+def _acordo(con: sqlite3.Connection, cid: int, clube: int, ano: int) -> dict | None:
+    r = con.execute("SELECT * FROM acordo WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
+                    (cid, clube, ano)).fetchone()
+    if r is None:
+        return None
+    return {**dict(r), "itens": json.loads(r["itens"]), "perfil": json.loads(r["perfil"]),
+            "balanco": json.loads(r["balanco"]) if r["balanco"] else None}
+
+
+def _salvar_itens(con: sqlite3.Connection, acordo: dict) -> None:
+    con.execute("UPDATE acordo SET itens = ? WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
+                (json.dumps(acordo["itens"], ensure_ascii=False), acordo["carreira_id"], acordo["clube_idx"],
+                 acordo["ano"]))
+
+
+def demitido(con: sqlite3.Connection, cid: int, clube: int) -> str | None:
+    """A data do jogo da demissão, se houve."""
+    r = con.execute("SELECT data_jogo FROM confianca WHERE carreira_id = ? AND clube_idx = ? AND chave LIKE 'demissao:%'",
+                    (cid, clube)).fetchone()
+    return r[0] if r else None
+
+
+def _ultimato_ativo(con: sqlite3.Connection, cid: int, clube: int) -> sqlite3.Row | None:
+    return con.execute("SELECT nascido_em, jogos FROM ultimato WHERE carreira_id = ? AND clube_idx = ? "
+                       "AND estado = 'ativo'", (cid, clube)).fetchone()
+
+
+def _criar_acordo(con: sqlite3.Connection, cid: int, clube: int, ano: int, hoje: str) -> None:
+    p = perfil(con, cid, ano)
+    atual = confianca(con, cid, clube)
+    if atual < PISO_DO_ANO and not _ultimato_ativo(con, cid, clube):
+        _evento(con, cid, clube, f"piso:{ano}", hoje, "Ano novo: a diretoria dá um voto de confiança", PISO_DO_ANO - atual)
+    # a primeira sincronização do ano já depois de 01/07 pula a revisão do meio do ano
+    con.execute("INSERT INTO acordo(carreira_id, clube_idx, ano, estado, itens, perfil, data_jogo, revisao_feita) "
+                "VALUES(?, ?, ?, 'proposto', ?, ?, ?, ?)",
+                (cid, clube, ano, json.dumps(proposta(p), ensure_ascii=False), json.dumps(p, ensure_ascii=False), hoje,
+                 int(hoje >= f"{ano}-07-01")))
+
+
+def _vence_a_reuniao(acordo: dict, hoje: str) -> bool:
+    """A reunião vence no 1º jogo da liga (sem liga, em 01/04). Acordo aberto com a liga já começada ganha 30 dias."""
+    prazo = acordo["perfil"]["liga"]["primeiro_jogo"] if acordo["perfil"]["liga"] else f"{acordo['ano']}-04-01"
+    if acordo["data_jogo"] >= prazo:
+        prazo = (date.fromisoformat(acordo["data_jogo"]) + timedelta(days=30)).isoformat()
+    return hoje >= prazo
+
+
+def _balanco(con: sqlite3.Connection, cid: int, acordo: dict, hoje: str) -> None:
+    """Fecha o ano: confere as metas e o vender_para_comprar, lança os eventos e guarda o resultado."""
+    clube, ano = acordo["clube_idx"], acordo["ano"]
+    metas = {}
+    for i in avaliar(con, cid, acordo, hoje, registrar=True, balanco=True):
+        if i["tipo"] == "meta_liga" and i["detalhe"]["posicao"] is not None:
+            pos, v = i["detalhe"]["posicao"], i["valor"]
+            if i["estado"] == "cumprido":
+                d, motivo = 15, f"Meta da liga cumprida ({pos}º, meta de {v}º)"
+            else:
+                d, motivo = -30 if pos > v + 4 else -20, f"Meta da liga não cumprida ({pos}º, meta de {v}º)"
+            _evento(con, cid, clube, f"balanco:meta_liga:{ano}", hoje, motivo, d)
+            metas["meta_liga"] = i["estado"]
+        elif i["tipo"] == "meta_copa" and i["estado"] in ("cumprido", "nao_cumprido"):
+            ok = i["estado"] == "cumprido"
+            _evento(con, cid, clube, f"balanco:meta_copa:{ano}:{i['copa']}", hoje,
+                    f"{i['copa']}: meta {'cumprida' if ok else 'não cumprida'} ({i['detalhe']['fase']})", 8 if ok else -8)
+            metas[i["copa"]] = i["estado"]
+    campeao = any(t["campeao"]["idx"] == clube and t["temporada"].startswith(str(ano)) for t in banco.titulos(con, cid))
+    momento = "campeao" if campeao else "nao_cumpriu" if any(e != "cumprido" for e in metas.values()) else "cumpriu"
+    con.execute("UPDATE acordo SET estado = 'encerrado', balanco = ? WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
+                (json.dumps({"metas": metas, "momento": momento, "data_jogo": hoje}, ensure_ascii=False), cid, clube, ano))
+
+
+def _titulos(con: sqlite3.Connection, cid: int, clube: int, inicio: str) -> None:
+    """Título conquistado desde o primeiro acordo (os de antes não mexem na confiança)."""
+    for t in banco.titulos(con, cid):
+        if t["campeao"]["idx"] == clube and t["fim"] >= inicio:
+            _evento(con, cid, clube, f"titulo:{t['chave']}", t["fim"], f"Título: {t['nome']} {t['temporada']}",
+                    20 if t["nome"] in TITULOS_GRANDES else 10)
+
+
+def _derrotas(con: sqlite3.Connection, cid: int, clube: int, inicio: str) -> None:
+    seguidas = []
+    for p in banco.partidas(con, cid):
+        if not p["disputada"] or p["data"] < inicio:
+            continue
+        pro, contra = banco._placar(p, clube)
+        seguidas = seguidas + [p["data"]] if pro < contra else []
+        if len(seguidas) == 5:
+            _evento(con, cid, clube, f"derrotas:{seguidas[0]}", p["data"], "5 derrotas seguidas", -5)
+
+
+def situacao_do_ultimato(todas: list[dict], jogos: list[list], clube: int) -> dict:
+    """Pontos nos jogos do ultimato já disputados e quantos faltam."""
+    # ponytail: jogo remarcado muda a data e não é achado (o ultimato fica esperando); casar por adversário se acontecer
+    chaves = {tuple(j) for j in jogos}
+    disputados = [p for p in todas if p["disputada"] and (p["data"], p["mandante_idx"], p["visitante_idx"]) in chaves]
+    pontos = sum(3 if a > b else 1 if a == b else 0 for a, b in (banco._placar(p, clube) for p in disputados))
+    return {"pontos": pontos, "faltam": len(chaves) - len(disputados), "jogos": jogos}
+
+
+def _ultimato(con: sqlite3.Connection, cid: int, clube: int, hoje: str) -> None:
+    todas = banco.partidas(con, cid)
+    ativo = _ultimato_ativo(con, cid, clube)
+    if ativo:
+        r = situacao_do_ultimato(todas, json.loads(ativo["jogos"]), clube)
+        if r["pontos"] >= 7:
+            novo = "cumprido"
+            _evento(con, cid, clube, f"ultimato:cumprido:{ativo['nascido_em']}", hoje,
+                    f"Ultimato cumprido ({r['pontos']} pontos)", 30 - confianca(con, cid, clube))
+        elif r["pontos"] + 3 * r["faltam"] < 7:
+            novo = "falhou"
+            _evento(con, cid, clube, f"demissao:{ativo['nascido_em']}", hoje,
+                    f"Demitido: ultimato não cumprido ({r['pontos']} pontos)", 0)
+        else:
+            return
+        con.execute("UPDATE ultimato SET estado = ? WHERE carreira_id = ? AND clube_idx = ? AND nascido_em = ?",
+                    (novo, cid, clube, ativo["nascido_em"]))
+    elif confianca(con, cid, clube) < LIMITE_ULTIMATO:
+        futuros = [p for p in todas if not p["disputada"] and p["data"] > hoje][:5]
+        if len(futuros) == 5:
+            con.execute("INSERT OR IGNORE INTO ultimato VALUES(?, ?, ?, ?, 'ativo')", (cid, clube, hoje, json.dumps(
+                [[p["data"], p["mandante_idx"], p["visitante_idx"]] for p in futuros])))
+            _evento(con, cid, clube, f"ultimato:inicio:{hoje}", hoje,
+                    "Ultimato: pelo menos 7 pontos nos próximos 5 jogos", 0)
+
+
+def atualizar(con: sqlite3.Connection, cid: int) -> None:
+    """Roda a cada sincronização, sem IA: fecha os anos anteriores, abre ou impõe o acordo do ano, fiscaliza, conta
+    títulos e derrotas e cuida do ultimato."""
+    s = banco._ultima(con, cid)
+    clube, hoje = s["clube_idx"], s["data_jogo"]
+    ano = int(hoje[:4])
+    with con:
+        for (a,) in con.execute("SELECT ano FROM acordo WHERE carreira_id = ? AND clube_idx = ? AND ano < ? "
+                                "AND estado <> 'encerrado'", (cid, clube, ano)).fetchall():
+            _balanco(con, cid, _acordo(con, cid, clube, a), hoje)
+        if demitido(con, cid, clube):
+            return
+        acordo = _acordo(con, cid, clube, ano)
+        if acordo is None:
+            _criar_acordo(con, cid, clube, ano, hoje)
+            acordo = _acordo(con, cid, clube, ano)
+        if acordo["estado"] == "proposto" and _vence_a_reuniao(acordo, hoje):
+            con.execute("UPDATE acordo SET estado = 'imposto', assinado_data = ? WHERE carreira_id = ? AND clube_idx = ? "
+                        "AND ano = ?", (hoje, cid, clube, ano))
+            _evento(con, cid, clube, f"faltou:{ano}", hoje, "Acordo imposto: o técnico faltou à reunião", -5)
+            acordo = _acordo(con, cid, clube, ano)
+        if acordo["estado"] != "encerrado":
+            avaliar(con, cid, acordo, hoje)
+            liga, _ = competicoes_do_ano(con, cid, ano, clube)
+            if liga and liga["encerrada"]:
+                _balanco(con, cid, acordo, hoje)
+        inicio = con.execute("SELECT min(data_jogo) FROM acordo WHERE carreira_id = ? AND clube_idx = ?",
+                             (cid, clube)).fetchone()[0]
+        _titulos(con, cid, clube, inicio)
+        _derrotas(con, cid, clube, inicio)
+        _ultimato(con, cid, clube, hoje)
+
+
+def pendencias(con: sqlite3.Connection, cid: int) -> list[dict]:
+    """O que a diretoria espera do técnico agora."""
+    s = banco._ultima(con, cid)
+    clube, ano = s["clube_idx"], int(s["data_jogo"][:4])
+    if d := demitido(con, cid, clube):
+        return [{"tipo": "demissao",
+                 "texto": f"Você foi demitido em {_data(d)}. Por honra, aceite a proposta de outro clube no PES."}]
+    lista = []
+    acordo = _acordo(con, cid, clube, ano)
+    if acordo and acordo["estado"] == "proposto":
+        lista.append({"tipo": "reuniao", "texto": f"A diretoria marcou a reunião do acordo de {ano}."})
+    if ativo := _ultimato_ativo(con, cid, clube):
+        r = situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube)
+        lista.append({"tipo": "ultimato",
+                      "texto": f"Ultimato: {r['pontos']} de 7 pontos, faltam {_plural(r['faltam'], 'jogo', 'jogos')}."})
+    return lista
