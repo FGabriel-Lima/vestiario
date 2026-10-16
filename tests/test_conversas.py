@@ -133,8 +133,8 @@ def _ia_do_jogador(monkeypatch, vontade="sair"):
     return chamadas
 
 
-def _segundo_save(con, propostas=(), elenco=(10, 11, 12), outros=((), ())):
-    banco.gravar(con, "ML00000000", fazer_save("2026-03-20", elenco=elenco, idades={10: 25, 11: 19, 12: 36},
+def _segundo_save(con, propostas=(), elenco=(10, 11, 12), outros=((), ()), data="2026-03-20"):
+    banco.gravar(con, "ML00000000", fazer_save(data, elenco=elenco, idades={10: 25, 11: 19, 12: 36},
                                                valores={10: 8000}, propostas=propostas, outros=outros), AGORA)
 
 
@@ -192,10 +192,10 @@ def test_despedida_sem_valor_de_outro_clube(con, monkeypatch):
 
 def test_oferta_melhorada_ja_ouvida_fica_calada(con, monkeypatch):
     chamadas = _ia_do_jogador(monkeypatch)
-    conversas.reagir_propostas(con, 1)
-    _segundo_save(con, propostas=[(1, 10, 11000)])
-    conversas.reagir_propostas(con, 1)
-    _segundo_save(con, propostas=[(1, 10, 11000)])  # a de 9000 segue fora, a de 11000 segue de pé
+    conversas.reagir_propostas(con, 1)  # reage à de 9000
+    _segundo_save(con, propostas=[(1, 10, 9000), (1, 10, 11000)])
+    conversas.reagir_propostas(con, 1)  # reage à de 11000
+    _segundo_save(con, propostas=[(1, 10, 11000)], data="2026-04-01")  # a de 9000 some, a de 11000 segue aberta
     assert conversas.reagir_propostas(con, 1) == 0 and len(chamadas) == 2
 
 
