@@ -2271,34 +2271,36 @@ const ESTADO_ITEM = {
 };
 
 function Diretoria({ id }) {
-  const [versao, setVersao] = useState(0);
-  const { dados: d, erro } = useDados(() => api.diretoria(id), [id, versao]);
+  const { dados, erro } = useDados(() => api.diretoria(id), [id]);
+  const [atual, setAtual] = useState(null);
   const [falha, setFalha] = useState(null);
+  const d = atual ?? dados;
   if (erro) return <Erro mensagem={erro} />;
   if (!d) return null;
+  // Todo POST devolve o estado inteiro: troca o estado local sem remontar a aba. Resolve true se deu certo.
   const agir = (pedido) => {
     setFalha(null);
-    return pedido.then(() => setVersao((v) => v + 1)).catch((e) => setFalha(e.message));
+    return pedido.then((novo) => (setAtual(novo), true)).catch((e) => (setFalha(e.message), false));
   };
   return (
     <div className="space-y-10">
-      <Termometro valor={d.confianca} demitido={d.demitido} />
+      <Termometro valor={d.confianca} demitido={d.demitido} faixas={d.regras.faixas} />
       {d.demitido && (
         <p className="rounded-md border-l-4 border-cartao bg-pitch-900 p-4">{d.pendencias[0]?.texto}</p>
       )}
       {falha && <Erro mensagem={falha} />}
-      {d.ultimato && <Ultimato u={d.ultimato} />}
-      {d.revisao && d.revisao.tipo !== "nada" && <Revisao id={id} r={d.revisao} agir={agir} />}
+      {d.ultimato && <Ultimato u={d.ultimato} regras={d.regras} />}
+      {d.revisao && d.revisao.tipo !== "nada" && <Revisao id={id} r={d.revisao} agir={agir} regras={d.regras} />}
       {!d.acordo && <p className="text-muted">A diretoria se reúne depois da próxima sincronização.</p>}
-      {d.acordo?.estado === "proposto" ? <SalaDaDiretoria id={id} d={d} agir={agir} /> : <Acordo d={d} />}
+      {d.acordo?.estado === "proposto" ? <SalaDaDiretoria id={id} d={d} agir={agir} regras={d.regras} /> : <Acordo d={d} />}
       <Historico itens={d.historico} />
     </div>
   );
 }
 
-function Termometro({ valor, demitido }) {
-  const humor = demitido ? "Demitido" : valor < 15 ? "Ultimato" : valor < 40 ? "Desconfiada" : valor < 70 ? "Atenta" : "Confiante";
-  const cor = valor < 15 ? "bg-cartao" : valor < 40 ? "bg-gold" : valor < 70 ? "bg-chalk/70" : "bg-neon";
+function Termometro({ valor, demitido, faixas: [f1, f2, f3] }) {
+  const humor = demitido ? "Demitido" : valor < f1 ? "Ultimato" : valor < f2 ? "Desconfiada" : valor < f3 ? "Atenta" : "Confiante";
+  const cor = valor < f1 ? "bg-cartao" : valor < f2 ? "bg-gold" : valor < f3 ? "bg-chalk/70" : "bg-neon";
   return (
     <section aria-label="Confiança da diretoria">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -2344,7 +2346,7 @@ function Acordo({ d }) {
       <p className="mb-4 text-sm text-muted">{situacao}</p>
       <ul className="divide-y divide-pitch-800 rounded-md border border-pitch-800 bg-pitch-900">
         {a.itens.map((i, k) => {
-          const [rotulo, cor] = ESTADO_ITEM[i.estado];
+          const [rotulo, cor] = ESTADO_ITEM[i.estado] ?? [i.estado.replace("_", " "), "bg-pitch-700 text-chalk"];
           return (
             <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
               <span className="min-w-0 flex-1 basis-60 first-letter:uppercase">{i.descricao}</span>
@@ -2377,7 +2379,7 @@ function Oferta({ o, onAceitar, rotulo = "Aceitar" }) {
   );
 }
 
-function SalaDaDiretoria({ id, d, agir }) {
+function SalaDaDiretoria({ id, d, agir, regras }) {
   const [texto, setTexto] = useState("");
   const [falando, setFalando] = useState(false);
   const fim = useRef(null);
@@ -2391,7 +2393,10 @@ function SalaDaDiretoria({ id, d, agir }) {
     if (!t || falando) return;
     setFalando(true);
     setTexto("");
-    agir(api.falarComPresidente(id, t)).finally(() => setFalando(false));
+    agir(api.falarComPresidente(id, t)).then((ok) => {
+      if (!ok) setTexto(t);
+      setFalando(false);
+    });
   };
   return (
     <section aria-labelledby="sala" className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -2462,20 +2467,20 @@ function SalaDaDiretoria({ id, d, agir }) {
         <button onClick={() => agir(api.assinarAcordo(id))} className="w-full rounded-md bg-gold px-4 py-2.5 font-kit text-lg font-bold uppercase tracking-wide text-pitch-950 hover:brightness-110">
           Assinar acordo
         </button>
-        <p className="text-xs text-muted">Sem assinatura até o 1º jogo da liga, a diretoria impõe a proposta e perde 5 de confiança.</p>
+        <p className="text-xs text-muted">Sem assinatura até o 1º jogo da liga, a diretoria impõe a proposta e perde {regras.falta_reuniao} de confiança.</p>
       </aside>
     </section>
   );
 }
 
-function Revisao({ id, r, agir }) {
+function Revisao({ id, r, agir, regras }) {
   return (
     <section aria-labelledby="revisao" className="rounded-md border border-gold/50 bg-pitch-900 p-4">
       <h2 id="revisao" className="font-kit text-xl font-semibold uppercase">Revisão do meio do ano</h2>
       <p className="mb-3 text-sm text-muted">
         {r.tipo === "afrouxar"
           ? "A campanha agradou: escolha uma exigência para a diretoria afrouxar, sem custo."
-          : "A diretoria quer apertar o acordo. Recusar custa 5 de confiança."}
+          : `A diretoria quer apertar o acordo. Recusar custa ${regras.recusa_revisao} de confiança.`}
       </p>
       <ul className="space-y-2">
         {r.opcoes.map((o) => (
@@ -2491,12 +2496,12 @@ function Revisao({ id, r, agir }) {
   );
 }
 
-function Ultimato({ u }) {
+function Ultimato({ u, regras }) {
   return (
     <section aria-labelledby="ultimato" className="rounded-md border-l-4 border-cartao bg-pitch-900 p-4">
       <h2 id="ultimato" className="font-kit text-xl font-semibold uppercase text-cartao">Ultimato</h2>
       <p>
-        A diretoria quer pelo menos 7 pontos nos próximos 5 jogos. Até agora: <b>{plural(u.pontos, "ponto", "pontos")}</b>, faltam{" "}
+        A diretoria quer pelo menos {regras.pontos_ultimato} pontos nos próximos {regras.jogos_ultimato} jogos. Até agora: <b>{plural(u.pontos, "ponto", "pontos")}</b>, faltam{" "}
         {plural(u.faltam, "jogo", "jogos")}.
       </p>
     </section>

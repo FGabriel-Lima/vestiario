@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 from . import banco, ia
 
 INICIAL, PISO_DO_ANO, LIMITE_ULTIMATO = 60, 25, 15
+PONTOS_ULTIMATO, JOGOS_ULTIMATO, FALTA_REUNIAO, RECUSA_REVISAO = 7, 5, 5, 5
+FAIXAS_CONFIANCA = (LIMITE_ULTIMATO, 40, 70)  # ultimato, revisão que endurece, revisão que afrouxa
 FASES_COPA = ["fase inicial", "oitavas de final", "quartas de final", "semifinal", "final", "título"]
 ORDEM_FASE = {"Oitavas de final": 1, "Quartas de final": 2, "Semifinal": 3, "Final": 4}
 
@@ -500,11 +502,11 @@ def _ultimato(con: sqlite3.Connection, cid: int, clube: int, hoje: str) -> None:
     ativo = _ultimato_ativo(con, cid, clube)
     if ativo:
         r = situacao_do_ultimato(todas, json.loads(ativo["jogos"]), clube)
-        if r["pontos"] >= 7:
+        if r["pontos"] >= PONTOS_ULTIMATO:
             novo = "cumprido"
             _evento(con, cid, clube, f"ultimato:cumprido:{ativo['nascido_em']}", hoje,
                     f"Ultimato cumprido ({r['pontos']} pontos)", 30 - confianca(con, cid, clube))
-        elif r["pontos"] + 3 * r["faltam"] < 7:
+        elif r["pontos"] + 3 * r["faltam"] < PONTOS_ULTIMATO:
             novo = "falhou"
             _evento(con, cid, clube, f"demissao:{ativo['nascido_em']}", hoje,
                     f"Demitido: ultimato não cumprido ({r['pontos']} pontos)", 0)
@@ -513,12 +515,12 @@ def _ultimato(con: sqlite3.Connection, cid: int, clube: int, hoje: str) -> None:
         con.execute("UPDATE ultimato SET estado = ? WHERE carreira_id = ? AND clube_idx = ? AND nascido_em = ?",
                     (novo, cid, clube, ativo["nascido_em"]))
     elif confianca(con, cid, clube) < LIMITE_ULTIMATO:
-        futuros = [p for p in todas if not p["disputada"] and p["data"] > hoje][:5]
-        if len(futuros) == 5:
+        futuros = [p for p in todas if not p["disputada"] and p["data"] > hoje][:JOGOS_ULTIMATO]
+        if len(futuros) == JOGOS_ULTIMATO:
             con.execute("INSERT OR IGNORE INTO ultimato VALUES(?, ?, ?, ?, 'ativo')", (cid, clube, hoje, json.dumps(
                 [[p["data"], p["mandante_idx"], p["visitante_idx"]] for p in futuros])))
             _evento(con, cid, clube, f"ultimato:inicio:{hoje}", hoje,
-                    "Ultimato: pelo menos 7 pontos nos próximos 5 jogos", 0)
+                    f"Ultimato: pelo menos {PONTOS_ULTIMATO} pontos nos próximos {JOGOS_ULTIMATO} jogos", 0)
 
 
 def atualizar(con: sqlite3.Connection, cid: int) -> None:
@@ -540,7 +542,7 @@ def atualizar(con: sqlite3.Connection, cid: int) -> None:
         if acordo["estado"] == "proposto" and _vence_a_reuniao(acordo, hoje):
             con.execute("UPDATE acordo SET estado = 'imposto', assinado_data = ? WHERE carreira_id = ? AND clube_idx = ? "
                         "AND ano = ?", (hoje, cid, clube, ano))
-            _evento(con, cid, clube, f"faltou:{ano}", hoje, "Acordo imposto: o técnico faltou à reunião", -5)
+            _evento(con, cid, clube, f"faltou:{ano}", hoje, "Acordo imposto: o técnico faltou à reunião", -FALTA_REUNIAO)
             acordo = _acordo(con, cid, clube, ano)
         if acordo["estado"] != "encerrado":
             avaliar(con, cid, acordo, hoje)
@@ -690,11 +692,11 @@ def revisao(con: sqlite3.Connection, cid: int) -> dict | None:
     itens = avaliar(con, cid, acordo, hoje, registrar=False)
     meta = next((i for i in itens if i["tipo"] == "meta_liga"), None)
     mercado_ = [n for n, i in enumerate(itens) if i["tipo"] in MERCADO]
-    if conf >= 70 and (meta is None or meta["estado"] == "em_dia"):
+    if conf >= FAIXAS_CONFIANCA[2] and (meta is None or meta["estado"] == "em_dia"):
         tipo = "afrouxar"
         opcoes = [{"id": f"rev:{n}", "item": n, "novo": v} for n in mercado_
                   if (v := _passo(acordo["itens"][n], 1)) is not None]
-    elif conf < 40 or (meta is not None and meta["estado"] == "em_risco"):
+    elif conf < FAIXAS_CONFIANCA[1] or (meta is not None and meta["estado"] == "em_risco"):
         tipo = "endurecer"
 
         def folga(n):
@@ -724,7 +726,7 @@ def responder_revisao(con: sqlite3.Connection, cid: int, escolha: str | None) ->
             acordo["itens"][o["item"]]["valor"] = o["novo"]
             _salvar_itens(con, acordo)
         elif r["tipo"] == "endurecer":
-            _evento(con, cid, clube, f"revisao:{ano}", s["data_jogo"], "Revisão: o técnico recusou o aperto da diretoria", -5)
+            _evento(con, cid, clube, f"revisao:{ano}", s["data_jogo"], "Revisão: o técnico recusou o aperto da diretoria", -RECUSA_REVISAO)
         con.execute("UPDATE acordo SET revisao_feita = 1 WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
                     (cid, clube, ano))
 
@@ -801,7 +803,10 @@ def estado(con: sqlite3.Connection, cid: int) -> dict:
                                   "itens": avaliar(con, cid, acordo, s["data_jogo"], registrar=False)},
             "cardapio": cardapio(acordo, conf) if acordo else [],
             "mensagens": mensagens(con, cid, clube, ano), "revisao": revisao(con, cid),
-            "ultimato": situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube) if ativo else None}
+            "ultimato": situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube) if ativo else None,
+            "regras": {"pontos_ultimato": PONTOS_ULTIMATO, "jogos_ultimato": JOGOS_ULTIMATO,
+                       "falta_reuniao": FALTA_REUNIAO, "recusa_revisao": RECUSA_REVISAO,
+                       "faixas": list(FAIXAS_CONFIANCA)}}
 
 
 def fatos_da_diretoria(con: sqlite3.Connection, cid: int) -> dict | None:

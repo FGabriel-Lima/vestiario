@@ -421,6 +421,7 @@ def test_estado_para_a_tela(con):
     assert all("descricao" in i and "uso" in i for i in e["acordo"]["itens"])
     assert diretoria.fatos_da_diretoria(con, 1)["acordo_do_ano"] == "proposto"
     assert diretoria.alertas(con, 1)[0]["tipo"] == "reuniao"
+    assert e["regras"] == {"pontos_ultimato": 7, "jogos_ultimato": 5, "falta_reuniao": 5, "recusa_revisao": 5, "faixas": [15, 40, 70]}
 
 
 def test_estado_sem_acordo_ainda(con):
