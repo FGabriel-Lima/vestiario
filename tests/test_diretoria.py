@@ -339,3 +339,47 @@ def test_revisao_sem_mudanca_e_marcada_sozinha(con):
     sincronizar(con, "2026-07-05", temporada(2026, 2))
     diretoria.atualizar(con, 1)
     assert diretoria.revisao(con, 1) is None  # confiança 60: nem afrouxa nem aperta
+
+
+def test_aceitar_endurecer_rende_confianca(con):
+    a = acordo_proposto(con)
+    n = indice(a, "contratacoes", 1)
+    diretoria.aceitar(con, 1, f"{n}:endurecer")
+    assert diretoria._acordo(con, 1, 0, 2026)["itens"][n]["valor"] == 3
+    assert diretoria.confianca(con, 1, 0) == 63
+
+
+def test_aceitar_meta_afrouxa_item_e_aperta_a_meta(con):
+    a = acordo_proposto(con)
+    n, m = indice(a, "contratacoes", 1), indice(a, "meta_liga")
+    diretoria.aceitar(con, 1, f"{n}:meta")
+    itens = diretoria._acordo(con, 1, 0, 2026)["itens"]
+    assert (itens[n]["valor"], itens[m]["valor"]) == (5, 2)
+    assert diretoria.confianca(con, 1, 0) == 60
+
+
+def test_revisao_afrouxa_com_confianca_alta(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    diretoria.assinar(con, 1)
+    diretoria._evento(con, 1, 0, "teste", "2026-01-10", "teste", 15)  # 75
+    sincronizar(con, "2026-07-05", temporada(2026, 2))
+    diretoria.atualizar(con, 1)
+    r = diretoria.revisao(con, 1)
+    assert r["tipo"] == "afrouxar" and r["opcoes"]
+    o = r["opcoes"][0]
+    diretoria.responder_revisao(con, 1, o["id"])
+    assert diretoria._acordo(con, 1, 0, 2026)["itens"][o["item"]]["valor"] == o["novo"]
+    assert diretoria.confianca(con, 1, 0) == 75
+    assert diretoria.revisao(con, 1) is None
+
+
+def test_revisao_com_opcao_invalida(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    diretoria.assinar(con, 1)
+    diretoria._evento(con, 1, 0, "teste", "2026-01-10", "teste", 15)
+    sincronizar(con, "2026-07-05", temporada(2026, 2))
+    diretoria.atualizar(con, 1)
+    with pytest.raises(ValueError):
+        diretoria.responder_revisao(con, 1, "rev:999")
