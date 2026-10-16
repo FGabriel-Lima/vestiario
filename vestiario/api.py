@@ -204,6 +204,21 @@ def post_parecer(cid: int, pedido: PedidoDeParecer):
         return p
 
 
+class PedidoDeReacao(BaseModel):
+    player_id: int
+
+
+@app.post("/api/carreiras/{cid}/propostas/reacao")
+def post_reacao(cid: int, pedido: PedidoDeReacao):
+    """O jogador fala agora das propostas por ele (quando a sincronização não conseguiu falar com a IA)."""
+    with _con() as con:
+        _carreira(con, cid)
+        try:
+            return {"enviadas": conversas.reagir_propostas(con, cid, pedido.player_id)}
+        except ia.IAIndisponivel as e:
+            raise HTTPException(503, str(e))
+
+
 @app.get("/api/carreiras/{cid}/feed")
 def get_feed(cid: int):
     """Posts publicados e se a data do jogo mais recente já foi publicada."""

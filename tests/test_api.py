@@ -249,3 +249,32 @@ def test_ficha_e_atencao(cliente, monkeypatch):
     assert f["total"]["gols"] == 2 and isinstance(f["sinais"], list)
     assert cliente.get("/api/carreiras/1/jogadores/999").status_code == 404
     assert set(cliente.get("/api/carreiras/1/atencao").json()) == {"propostas", "contratos", "promessas", "sem_espaco"}
+
+
+def test_reacao_a_proposta(cliente, monkeypatch):
+    con = banco.conectar(api.DB)
+    banco.gravar_nomes(con, {10: "Titular"}, {10: 12})
+    banco.gravar(con, "ML00000000", fazer_save("2026-03-01", elenco=(10,), propostas=[(1, 10, 9000)]),
+                 datetime(2026, 10, 14))
+    con.close()
+    monkeypatch.setattr(ia, "responder", lambda *a: {"mensagem": "Quero ficar, professor.", "vontade": "ficar"})
+    assert cliente.post("/api/carreiras/1/propostas/reacao", json={"player_id": 10}).json() == {"enviadas": 1}
+    assert cliente.get("/api/carreiras/1/transferencias").json()["propostas"][0]["vontade"] == "ficar"
+    assert cliente.get("/api/carreiras/1/conversas").json()[1]["nao_lidas"] == 1
+
+
+def test_sincronizar_manda_a_mensagem_do_jogador(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save("2026-03-01", elenco=(10,), propostas=[(1, 10, 9000)]))
+    api.SAVES.mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    monkeypatch.setattr(ia, "responder", lambda *a: {"posts": [], "mensagem": "Quero sair.", "vontade": "sair"})
+    cliente.post("/api/sincronizar")
+    assert cliente.get("/api/carreiras/1/transferencias").json()["propostas"][0]["vontade"] == "sair"
+
+
+def test_sincronizar_sem_ia_avisa_das_mensagens(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save("2026-03-01", elenco=(10,), propostas=[(1, 10, 9000)]))
+    api.SAVES.mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    avisos = cliente.post("/api/sincronizar").json()["avisos"]
+    assert any("Mensagens dos jogadores" in a for a in avisos)
