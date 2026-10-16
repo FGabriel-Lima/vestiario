@@ -65,6 +65,23 @@ CREATE TABLE IF NOT EXISTS promessa(
 CREATE TABLE IF NOT EXISTS coletiva(
   carreira_id INTEGER NOT NULL REFERENCES carreira, data TEXT NOT NULL, perguntas TEXT NOT NULL, respostas TEXT,
   legenda TEXT, em TEXT NOT NULL, PRIMARY KEY(carreira_id, data));
+-- diretoria: um acordo por clube e ano (itens e perfil em JSON); eventos de confiança (a chave nunca se repete;
+-- o valor é a soma a partir de 60, presa entre 0 e 100); mensagens da reunião com o presidente; ultimato
+-- (jogos = [[data, mandante_idx, visitante_idx], ...]; estado ativo, cumprido ou falhou)
+CREATE TABLE IF NOT EXISTS acordo(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, clube_idx INTEGER NOT NULL, ano INTEGER NOT NULL,
+  estado TEXT NOT NULL, itens TEXT NOT NULL, perfil TEXT NOT NULL, data_jogo TEXT NOT NULL, assinado_data TEXT,
+  revisao_feita INTEGER NOT NULL DEFAULT 0, balanco TEXT, PRIMARY KEY(carreira_id, clube_idx, ano));
+CREATE TABLE IF NOT EXISTS confianca(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, clube_idx INTEGER NOT NULL, chave TEXT NOT NULL,
+  data_jogo TEXT NOT NULL, motivo TEXT NOT NULL, variacao INTEGER NOT NULL, PRIMARY KEY(carreira_id, clube_idx, chave));
+CREATE TABLE IF NOT EXISTS reuniao(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, clube_idx INTEGER NOT NULL, ano INTEGER NOT NULL,
+  ordem INTEGER NOT NULL, autor TEXT NOT NULL, texto TEXT NOT NULL, ofertas TEXT, em TEXT NOT NULL,
+  PRIMARY KEY(carreira_id, clube_idx, ano, ordem));
+CREATE TABLE IF NOT EXISTS ultimato(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, clube_idx INTEGER NOT NULL, nascido_em TEXT NOT NULL,
+  jogos TEXT NOT NULL, estado TEXT NOT NULL, PRIMARY KEY(carreira_id, clube_idx, nascido_em));
 CREATE TABLE IF NOT EXISTS time(
   carreira_id INTEGER NOT NULL REFERENCES carreira, idx INTEGER NOT NULL, nome TEXT NOT NULL,
   pes_id INTEGER,

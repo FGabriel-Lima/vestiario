@@ -42,12 +42,12 @@ def fazer_save(data_jogo="2026-03-01", partidas=(), elenco=(10, 11, 12), nome="L
                outros=((), ()), negocios=(), contratos=None, orcamento=None, idades=None,
                competicoes=None, valores=None, propostas=(), times4=False, folga_salarial=None, receitas=None) -> Save:
     """outros = elencos do Clube B e do Clube C; o do Clube A é o elenco. negocios = (player_id, valor, tipo).
-    contratos = {player_id: (salário anual, multa, "AAAA-MM-DD")}."""
+    contratos = {player_id: (salário anual, multa, "AAAA-MM-DD"[, empréstimo])}."""
     return Save(nome=nome, clube="Clube A", data_jogo=date.fromisoformat(data_jogo),
                 times=["Clube A", "Clube B", "Clube C"] + (["Seleção"] if times4 else []), clube_idx=0,
                 elenco=list(elenco), partidas=list(partidas),
                 elencos=[list(elenco), *map(list, outros)], negocios=[Negocio(*n) for n in negocios],
-                contratos={p: Contrato(a, m, date.fromisoformat(f)) for p, (a, m, f) in (contratos or {}).items()},
+                contratos={p: Contrato(c[0], c[1], date.fromisoformat(c[2]), *c[3:]) for p, c in (contratos or {}).items()},
                 orcamento=orcamento, idades=dict(idades or {}), valores=dict(valores or {}),
                 competicoes=dict(competicoes or {}), propostas=[Proposta(*p) for p in propostas],
                 folga_salarial=folga_salarial, receitas=dict(receitas or {}))
