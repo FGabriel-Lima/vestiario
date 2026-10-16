@@ -552,6 +552,9 @@ def atualizar(con: sqlite3.Connection, cid: int) -> None:
         _titulos(con, cid, clube, inicio)
         _derrotas(con, cid, clube, inicio)
         _ultimato(con, cid, clube, hoje)
+        if (r := revisao(con, cid)) is not None and r["tipo"] == "nada":
+            con.execute("UPDATE acordo SET revisao_feita = 1 WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
+                        (cid, clube, ano))
 
 
 def pendencias(con: sqlite3.Connection, cid: int) -> list[dict]:
@@ -569,4 +572,158 @@ def pendencias(con: sqlite3.Connection, cid: int) -> list[dict]:
         r = situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube)
         lista.append({"tipo": "ultimato",
                       "texto": f"Ultimato: {r['pontos']} de 7 pontos, faltam {_plural(r['faltam'], 'jogo', 'jogos')}."})
+    if revisao(con, cid) is not None:
+        lista.append({"tipo": "revisao", "texto": "A diretoria quer revisar o acordo no meio do ano."})
     return lista
+
+
+def _preco(p: dict, conf: int) -> int:
+    """Quanto de confiança custa um passo (spec, seção 3)."""
+    c = 8
+    if p["porte"] == "grande" or conf >= 70:
+        c -= 2
+    if p["crise"]:
+        c += 4
+    return c
+
+
+def _passo(item: dict, sentido: int) -> int | None:
+    """O valor um passo para afrouxar (sentido 1) ou endurecer (-1), se couber na faixa e nos limites."""
+    amplitude, passo = FAIXA[item["tipo"]]
+    novo = item["valor"] + AFROUXA[item["tipo"]] * sentido * passo
+    lo, hi = LIMITES[item["tipo"]]
+    return novo if item["base"] - amplitude <= novo <= item["base"] + amplitude and lo <= novo <= hi else None
+
+
+def _texto_da_oferta(item: dict, o: dict, itens: list[dict]) -> str:
+    mudanca = f"{descrever(item, o['novo'])} (em vez de {descrever(item)})"
+    pr = o["preco"]
+    if "meta_liga" in pr:
+        meta = next(i for i in itens if i["tipo"] == "meta_liga")
+        return f"{mudanca}, em troca de {descrever(meta, pr['meta_liga'])}"
+    if "vender_salarios" in pr:
+        return f"{mudanca}, em troca de vender {pr['vender_salarios']} dos 5 maiores salários até 30/09"
+    if pr["confianca"] < 0:
+        return f"{mudanca}, custa {-pr['confianca']} de confiança"
+    return f"{mudanca}, rende {pr['confianca']} de confiança"
+
+
+def cardapio(acordo: dict, conf: int) -> list[dict]:
+    """O que dá para mudar no acordo proposto e o preço de cada mudança. Afrouxar um passo custa confiança, subir a
+    meta da liga ou vender um dos maiores salários; endurecer um passo rende metade do preço em confiança."""
+    if acordo["estado"] != "proposto":
+        return []
+    p, itens = acordo["perfil"], acordo["itens"]
+    c = _preco(p, conf)
+    meta = next((n for n, i in enumerate(itens) if i["tipo"] == "meta_liga"), None)
+    venda = next((n for n, i in enumerate(itens) if i["tipo"] == "vender_salarios"), None)
+    opcoes = []
+    for n, item in enumerate(itens):
+        if (novo := _passo(item, 1)) is not None:
+            opcoes.append({"id": f"{n}:confianca", "item": n, "novo": novo, "preco": {"confianca": -c}})
+            if meta is not None and n != meta and (m := _passo(itens[meta], -1)) is not None:
+                opcoes.append({"id": f"{n}:meta", "item": n, "novo": novo, "preco": {"meta_liga": m}})
+            if n != venda and p["maiores_salarios"] and (venda is None or _passo(itens[venda], -1) is not None):
+                opcoes.append({"id": f"{n}:venda", "item": n, "novo": novo,
+                               "preco": {"vender_salarios": itens[venda]["valor"] + 1 if venda is not None else 1}})
+        if (novo := _passo(item, -1)) is not None:
+            opcoes.append({"id": f"{n}:endurecer", "item": n, "novo": novo, "preco": {"confianca": c // 2}})
+    for o in opcoes:
+        o["texto"] = _texto_da_oferta(itens[o["item"]], o, itens)
+    return opcoes
+
+
+def _do_ano(con: sqlite3.Connection, cid: int) -> tuple[sqlite3.Row, int, int, dict | None]:
+    s = banco._ultima(con, cid)
+    ano = int(s["data_jogo"][:4])
+    return s, s["clube_idx"], ano, _acordo(con, cid, s["clube_idx"], ano)
+
+
+def aceitar(con: sqlite3.Connection, cid: int, oferta: str) -> None:
+    s, clube, ano, acordo = _do_ano(con, cid)
+    if acordo is None or acordo["estado"] != "proposto":
+        raise LookupError("Não há acordo em negociação")
+    o = next((x for x in cardapio(acordo, confianca(con, cid, clube)) if x["id"] == oferta), None)
+    if o is None:
+        raise ValueError("Essa mudança não está mais na mesa")
+    itens = acordo["itens"]
+    with con:
+        itens[o["item"]]["valor"] = o["novo"]
+        pr = o["preco"]
+        if "meta_liga" in pr:
+            next(i for i in itens if i["tipo"] == "meta_liga")["valor"] = pr["meta_liga"]
+        elif "vender_salarios" in pr:
+            venda = next((i for i in itens if i["tipo"] == "vender_salarios"), None)
+            if venda:
+                venda["valor"] = pr["vender_salarios"]
+            else:
+                itens.append(_item("vender_salarios", 1, jogadores=acordo["perfil"]["maiores_salarios"]))
+        elif pr["confianca"]:
+            n = con.execute("SELECT count(*) FROM confianca WHERE carreira_id = ? AND clube_idx = ? AND chave LIKE ?",
+                            (cid, clube, f"acordo:{ano}:%")).fetchone()[0]
+            _evento(con, cid, clube, f"acordo:{ano}:{n}", s["data_jogo"], f"Reunião: {o['texto']}", pr["confianca"])
+        _salvar_itens(con, acordo)
+
+
+def assinar(con: sqlite3.Connection, cid: int) -> None:
+    s, clube, ano, acordo = _do_ano(con, cid)
+    if acordo is None or acordo["estado"] != "proposto":
+        raise LookupError("Não há acordo para assinar")
+    with con:
+        con.execute("UPDATE acordo SET estado = 'assinado', assinado_data = ? WHERE carreira_id = ? AND clube_idx = ? "
+                    "AND ano = ?", (s["data_jogo"], cid, clube, ano))
+
+
+MERCADO = ("contratacoes", "teto_contratacao", "livres", "emprestimos", "vender_para_comprar", "folha_maxima")
+
+
+def revisao(con: sqlite3.Connection, cid: int) -> dict | None:
+    """A revisão do meio do ano (spec, seção 4): None quando não é hora. Com confiança alta e a meta em dia, a
+    diretoria afrouxa um passo de um item à escolha; com confiança baixa ou a meta em risco, endurece o item de mercado
+    com mais folga."""
+    s, clube, ano, acordo = _do_ano(con, cid)
+    hoje = s["data_jogo"]
+    if (acordo is None or acordo["estado"] not in ("assinado", "imposto") or acordo["revisao_feita"]
+            or hoje < f"{ano}-07-01"):
+        return None
+    conf = confianca(con, cid, clube)
+    itens = avaliar(con, cid, acordo, hoje, registrar=False)
+    meta = next((i for i in itens if i["tipo"] == "meta_liga"), None)
+    mercado_ = [n for n, i in enumerate(itens) if i["tipo"] in MERCADO]
+    if conf >= 70 and (meta is None or meta["estado"] == "em_dia"):
+        tipo = "afrouxar"
+        opcoes = [{"id": f"rev:{n}", "item": n, "novo": v} for n in mercado_
+                  if (v := _passo(acordo["itens"][n], 1)) is not None]
+    elif conf < 40 or (meta is not None and meta["estado"] == "em_risco"):
+        tipo = "endurecer"
+
+        def folga(n):
+            d = itens[n]["detalhe"]
+            return itens[n]["valor"] - d.get("usadas", d.get("usados", itens[n]["valor"]))
+
+        alvos = sorted((n for n in mercado_ if _passo(acordo["itens"][n], -1) is not None), key=folga, reverse=True)
+        opcoes = [{"id": f"rev:{alvos[0]}", "item": alvos[0], "novo": _passo(acordo["itens"][alvos[0]], -1)}] if alvos else []
+    else:
+        tipo, opcoes = "nada", []
+    for o in opcoes:
+        item = acordo["itens"][o["item"]]
+        o["texto"] = f"{descrever(item, o['novo'])} (em vez de {descrever(item)})"
+    return {"tipo": tipo if opcoes else "nada", "opcoes": opcoes}
+
+
+def responder_revisao(con: sqlite3.Connection, cid: int, escolha: str | None) -> None:
+    s, clube, ano, acordo = _do_ano(con, cid)
+    r = revisao(con, cid)
+    if r is None:
+        raise LookupError("Não há revisão pendente")
+    o = next((x for x in r["opcoes"] if x["id"] == escolha), None)
+    if escolha is not None and o is None:
+        raise ValueError("Opção inválida")
+    with con:
+        if o:
+            acordo["itens"][o["item"]]["valor"] = o["novo"]
+            _salvar_itens(con, acordo)
+        elif r["tipo"] == "endurecer":
+            _evento(con, cid, clube, f"revisao:{ano}", s["data_jogo"], "Revisão: o técnico recusou o aperto da diretoria", -5)
+        con.execute("UPDATE acordo SET revisao_feita = 1 WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
+                    (cid, clube, ano))

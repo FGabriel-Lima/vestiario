@@ -268,3 +268,74 @@ def test_cinco_derrotas_seguidas(con):
     sincronizar(con, "2026-03-06", jogos_do_ultimato([(0, 1)] * 5))
     diretoria.atualizar(con, 1)
     assert any(h["motivo"] == "5 derrotas seguidas" for h in diretoria.historico(con, 1, 0))
+
+
+def acordo_proposto(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0), orcamento=100_000, contratos={10: (52_000, 0, "2028-01-31")})
+    diretoria.atualizar(con, 1)
+    return diretoria._acordo(con, 1, 0, 2026)
+
+
+def indice(acordo, tipo, janela=None):
+    return next(n for n, i in enumerate(acordo["itens"]) if i["tipo"] == tipo and i.get("janela") == janela)
+
+
+def test_cardapio_e_preco(con):
+    a = acordo_proposto(con)  # grande: meta 3º (só 3 times), 4/3 contratações, preço 6 de confiança
+    n = indice(a, "contratacoes", 1)
+    ops = {o["id"]: o for o in diretoria.cardapio(a, 60)}
+    assert (ops[f"{n}:confianca"]["novo"], ops[f"{n}:confianca"]["preco"]) == (5, {"confianca": -6})
+    assert ops[f"{n}:endurecer"]["preco"] == {"confianca": 3}
+    assert ops[f"{n}:meta"]["preco"] == {"meta_liga": 2}
+    assert ops[f"{n}:venda"]["preco"] == {"vender_salarios": 1}
+    assert ops[f"{n}:confianca"]["texto"] == (
+        "até 5 contratações na janela de janeiro (em vez de até 4 contratações na janela de janeiro), "
+        "custa 6 de confiança")
+
+
+def test_aceitar_ate_o_fim_da_faixa_e_assinar(con):
+    a = acordo_proposto(con)
+    n = indice(a, "contratacoes", 1)
+    diretoria.aceitar(con, 1, f"{n}:confianca")
+    diretoria.aceitar(con, 1, f"{n}:confianca")
+    with pytest.raises(ValueError):
+        diretoria.aceitar(con, 1, f"{n}:confianca")  # 4 + 2 é o fim da faixa
+    assert diretoria._acordo(con, 1, 0, 2026)["itens"][n]["valor"] == 6
+    assert diretoria.confianca(con, 1, 0) == 48
+    diretoria.assinar(con, 1)
+    assert diretoria._acordo(con, 1, 0, 2026)["estado"] == "assinado"
+    with pytest.raises(LookupError):
+        diretoria.aceitar(con, 1, f"{n}:endurecer")
+
+
+def test_concessao_em_troca_de_venda_cria_o_item(con):
+    a = acordo_proposto(con)
+    n = indice(a, "livres")
+    diretoria.aceitar(con, 1, f"{n}:venda")
+    itens = diretoria._acordo(con, 1, 0, 2026)["itens"]
+    assert itens[n]["valor"] == 3
+    assert next(i for i in itens if i["tipo"] == "vender_salarios")["jogadores"] == [10]
+    assert diretoria.confianca(con, 1, 0) == 60  # quem paga é a venda, não a confiança
+
+
+def test_revisao_aperta_com_confianca_baixa(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    diretoria.assinar(con, 1)
+    diretoria._evento(con, 1, 0, "teste", "2026-01-10", "teste", -25)  # 35
+    sincronizar(con, "2026-07-05", temporada(2026, 2))
+    diretoria.atualizar(con, 1)
+    r = diretoria.revisao(con, 1)
+    assert r["tipo"] == "endurecer" and len(r["opcoes"]) == 1
+    assert "revisao" in [p["tipo"] for p in diretoria.pendencias(con, 1)]
+    diretoria.responder_revisao(con, 1, None)
+    assert diretoria.revisao(con, 1) is None and diretoria.confianca(con, 1, 0) == 30
+
+
+def test_revisao_sem_mudanca_e_marcada_sozinha(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    diretoria.atualizar(con, 1)
+    diretoria.assinar(con, 1)
+    sincronizar(con, "2026-07-05", temporada(2026, 2))
+    diretoria.atualizar(con, 1)
+    assert diretoria.revisao(con, 1) is None  # confiança 60: nem afrouxa nem aperta
