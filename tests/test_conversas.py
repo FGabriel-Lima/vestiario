@@ -176,7 +176,7 @@ def test_jogador_vendido_se_despede(con, monkeypatch):
     conversas.reagir_propostas(con, 1)
     _segundo_save(con, elenco=(11, 12), outros=((10,), ()))
     assert conversas.reagir_propostas(con, 1) == 1
-    assert chamadas[1]["despedida"] == {"clube_novo": "Clube B"}
+    assert chamadas[1]["despedida"] == {"clube_novo": "Clube B", "valor": 9000 * MOEDA}
     assert chamadas[1]["jogador"]["nome"] == "Titular"
     p = banco.propostas(con, 1)[0]
     assert (p["situacao"], p["fala"]) == ("saiu", "Professor, mensagem 2.")
@@ -196,6 +196,23 @@ def test_oferta_melhorada_do_mesmo_clube(con, monkeypatch):
     assert chamadas[1]["propostas_novas"] == [{"clube": "Clube B", "valor": 11000 * MOEDA, "oferta_anterior": 9000 * MOEDA}]
     assert "propostas_encerradas_agora" not in chamadas[1]
     assert conversas.reagir_propostas(con, 1) == 0
+
+
+def test_oferta_melhorada_sobrevive_a_falha_da_ia(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, propostas=[(1, 10, 11000)])
+    boa = ia.responder
+
+    def fora(*a):
+        raise ia.IAIndisponivel("fora")
+
+    monkeypatch.setattr(ia, "responder", fora)
+    with pytest.raises(ia.IAIndisponivel):
+        conversas.reagir_propostas(con, 1)
+    monkeypatch.setattr(ia, "responder", boa)
+    assert conversas.reagir_propostas(con, 1) == 1
+    assert chamadas[1]["propostas_novas"][0]["oferta_anterior"] == 9000 * MOEDA
 
 
 def test_ia_fora_nao_grava_reacao(con, monkeypatch):

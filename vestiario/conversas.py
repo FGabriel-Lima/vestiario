@@ -52,8 +52,9 @@ sair, pesando o seu momento ("como_voce_esta", minutos, fase, contrato, idade), 
 ("valor_do_elenco" dele comparado ao "valor_do_nosso_elenco") e as promessas do professor. Com "oferta_anterior", o
 clube melhorou a oferta. Em "vontade", ponha "ficar", "sair" ou "dividido", coerente com a mensagem.
 Se houver "propostas_encerradas_agora": a proposta acabou e você continua no clube (o professor recusou ou ela
-expirou). Reaja de acordo com "sua_vontade" na época: frustrado se queria sair, aliviado se queria ficar.
-Se houver "despedida": você foi vendido e está deixando o clube. Despeça-se do professor.
+expirou). Reaja de acordo com "sua_vontade" na época: frustrado se queria sair, aliviado se queria ficar,
+com sentimentos mistos se estava dividido.
+Se houver "despedida": você está deixando o clube (em "clube_novo", para onde vai, se soubermos). Despeça-se do professor.
 
 """ + REGRAS
 ESQUEMA_REACAO = {"type": "OBJECT", "properties": {"mensagem": {"type": "STRING"},
@@ -241,7 +242,8 @@ def _ouvir(con: sqlite3.Connection, cid: int, pid: int, fatos: dict) -> tuple[st
 
 
 def _gravar_fala(con: sqlite3.Connection, cid: int, pid: int, texto: str, data_jogo: str) -> None:
-    con.execute("INSERT INTO mensagem SELECT ?, ?, coalesce(max(ordem), -1) + 1, 'contato', ?, ?, ?, 0 FROM mensagem "
+    con.execute("INSERT INTO mensagem(carreira_id, contato, ordem, autor, texto, data_jogo, em, lida) "
+                "SELECT ?, ?, coalesce(max(ordem), -1) + 1, 'contato', ?, ?, ?, 0 FROM mensagem "
                 "WHERE carreira_id = ? AND contato = ?", (cid, str(pid), texto, data_jogo,
                                                           datetime.now().isoformat(timespec="seconds"), cid, str(pid)))
 
@@ -257,16 +259,19 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
     k = lambda p: (p["player_id"], p["clube"]["idx"], p["valor_bruto"])
     estado = {(r[0], r[1], r[2]): (r[3], r[4]) for r in con.execute(
         "SELECT player_id, clube_idx, valor, vontade, desfecho_avisado FROM vontade WHERE carreira_id = ?", (cid,))}
-    abertas = {(p["player_id"], p["clube"]["idx"]) for p in todas if p["situacao"] == "aberta"}
+    # a maior oferta nova (ainda sem reação) de cada jogador e clube: só ela torna a antiga uma "melhorada"
+    abertas = {}
+    for p in todas:
+        if p["situacao"] == "aberta" and k(p) not in estado:
+            c = (p["player_id"], p["clube"]["idx"])
+            abertas[c] = max(abertas.get(c, 0), p["valor_bruto"])
     acabadas = [p for p in todas if p["situacao"] != "aberta"]
     pendentes = [p for p in acabadas if k(p) in estado and estado[k(p)][0] and not estado[k(p)][1]]
-    melhoradas = [p for p in pendentes if (p["player_id"], p["clube"]["idx"]) in abertas]
+    melhoradas = [p for p in pendentes if abertas.get((p["player_id"], p["clube"]["idx"]), 0) > p["valor_bruto"]]
     anterior = {(p["player_id"], p["clube"]["idx"]): p["valor"] for p in melhoradas}
     with con:
         con.executemany("INSERT INTO vontade(carreira_id, player_id, clube_idx, valor, desfecho_avisado) "
                         "VALUES(?, ?, ?, ?, 1)", [(cid, *k(p)) for p in acabadas if k(p) not in estado])
-        con.executemany("UPDATE vontade SET desfecho_avisado = 1 WHERE carreira_id = ? AND player_id = ? "
-                        "AND clube_idx = ? AND valor = ?", [(cid, *k(p)) for p in melhoradas])
     novas, fins = {}, {}
     for p in todas:
         if p["situacao"] == "aberta" and k(p) not in estado:
@@ -278,6 +283,8 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
     enviadas = 0
     for jogador, ps in novas.items():
         fatos = _fatos(con, cid, str(jogador))
+        if fatos is None:
+            continue
         fatos.update(_sem_nulos({"valor_do_nosso_elenco": _valor_do_elenco(con, s["id"], s["clube_idx"])}))
         fatos["propostas_novas"] = [_sem_nulos({
             "clube": p["clube"]["nome"], "valor": p["valor"],
@@ -288,15 +295,22 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
             _gravar_fala(con, cid, jogador, texto, s["data_jogo"])
             con.executemany("INSERT INTO vontade(carreira_id, player_id, clube_idx, valor, vontade, fala) "
                             "VALUES(?, ?, ?, ?, ?, ?)", [(cid, *k(p), vontade, texto) for p in ps])
+            # só agora a oferta antiga está resolvida: se a IA falhar, ela volta a valer na próxima tentativa
+            con.executemany("UPDATE vontade SET desfecho_avisado = 1 WHERE carreira_id = ? AND player_id = ? "
+                            "AND clube_idx = ? AND valor = ?", [(cid, *k(p)) for p in melhoradas if p["player_id"] == jogador])
         enviadas += 1
     for jogador, ps in fins.items():
         if ps[0]["situacao"] == "saiu":  # quem saiu do elenco sai de todas as propostas de uma vez
-            novo = con.execute("SELECT t.nome FROM vinculo v JOIN time t ON t.carreira_id = ? AND t.idx = v.time_idx "
+            novo = con.execute("SELECT t.nome, v.time_idx FROM vinculo v JOIN time t ON t.carreira_id = ? AND t.idx = v.time_idx "
                                "WHERE v.sincronizacao_id = ? AND v.player_id = ?", (cid, s["id"], jogador)).fetchone()
+            # a proposta do clube novo, se houver; senão a primeira
+            valor = next((p["valor"] for p in ps if novo and p["clube"]["idx"] == novo[1]), ps[0]["valor"])
             fatos = {"jogador": banco._jogador(con, cid, s, jogador)[0],
-                     "despedida": _sem_nulos({"clube_novo": novo[0] if novo else None})}
+                     "despedida": _sem_nulos({"clube_novo": novo[0] if novo else None, "valor": valor})}
         else:
             fatos = _fatos(con, cid, str(jogador))
+            if fatos is None:
+                continue
             fatos["propostas_encerradas_agora"] = [{"clube": p["clube"]["nome"], "valor": p["valor"],
                                                     "sua_vontade": p["vontade"]} for p in ps]
         texto, _ = _ouvir(con, cid, jogador, fatos)
