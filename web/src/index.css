@@ -328,7 +328,30 @@ body {
   }
 }
 
-/* Súmula: folha de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
+/* Mensagem do jogador na carta da proposta: balão de WhatsApp com a ponta no alto, à esquerda (o papel é do auxiliar) */
+.balao-zap {
+  position: relative;
+  border-radius: 0 0.75rem 0.75rem 0.75rem;
+  background: var(--color-pitch-800);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.4);
+  transition: background-color 150ms ease;
+}
+.balao-zap::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 100%;
+  width: 0.5rem;
+  height: 0.7rem;
+  background: inherit;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+button:hover > .balao-zap,
+button:focus-visible > .balao-zap {
+  background: var(--color-pitch-700);
+}
+
+ de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
 .sumula {
   width: min(100% - 2rem, 46rem);
   max-width: none;

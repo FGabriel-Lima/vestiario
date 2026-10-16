@@ -45,6 +45,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ player_id: p.player_id, clube_idx: p.clube.idx, valor: p.valor_bruto }),
     }),
+  reacao: (id, pid) =>
+    pedir(`/carreiras/${id}/propostas/reacao`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player_id: pid }),
+    }),
   campeonato: (id, chave) => pedir(`/carreiras/${id}/campeonato?chave=${encodeURIComponent(chave)}`),
 };
 

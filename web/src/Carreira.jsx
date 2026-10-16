@@ -73,6 +73,19 @@ export default function Carreira({ id, onVoltar }) {
   const [aba, setAba] = useState(ABAS[0]);
   const [contato, setContato] = useState(null);
   const [ficha, setFicha] = useState(null);
+  const [contatos, setContatos] = useState([]);
+  useEffect(() => {
+    api.contatos(id).then(setContatos).catch(() => setContatos([]));
+  }, [id, aba, contato]);
+  // a conversa aberta já foi lida, mesmo que a lista tenha vindo antes de o servidor marcar
+  const naoLidas = contatos.reduce((n, c) => n + (aba === "Conversas" && c.contato === contato ? 0 : c.nao_lidas ?? 0), 0);
+  const contador = (a) =>
+    a === "Conversas" &&
+    naoLidas > 0 && (
+      <span aria-label={`${naoLidas} não lida${naoLidas > 1 ? "s" : ""}`} className="ml-2 rounded-full bg-destaque px-1.5 align-middle font-sans text-xs font-bold not-italic text-pitch-950">
+        {naoLidas}
+      </span>
+    );
   const conversar = (c) => {
     setFicha(null);
     setContato(c);
@@ -115,6 +128,7 @@ export default function Carreira({ id, onVoltar }) {
       }`}
     >
       {a}
+      {contador(a)}
     </button>
   );
 
@@ -169,6 +183,7 @@ export default function Carreira({ id, onVoltar }) {
               }`}
             >
               {a}
+              {contador(a)}
             </button>
           ))}
         </nav>
@@ -209,7 +224,7 @@ export default function Carreira({ id, onVoltar }) {
               {aba === "Feed" && <Feed id={id} />}
               {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} onFicha={setFicha} />}
               {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
-              {aba === "Transferências" && <Transferencias id={id} />}
+              {aba === "Transferências" && <Transferencias id={id} onConversar={conversar} />}
               {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
               {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
               {aba === "Pelo mundo" && <PeloMundo id={id} ano={ano} clube={carreira.clube_idx} />}
@@ -240,11 +255,15 @@ export default function Carreira({ id, onVoltar }) {
             key={g.nome}
             onClick={() => g !== grupo && setAba(g.abas[0])}
             aria-current={g === grupo ? "true" : undefined}
-            className={`flex flex-col items-center gap-0.5 py-2 font-kit text-sm font-semibold uppercase tracking-wide ${
+            aria-label={g.nome === "Bastidores" && naoLidas > 0 ? `${g.nome}, ${naoLidas} mensage${naoLidas > 1 ? "ns" : "m"} não lida${naoLidas > 1 ? "s" : ""}` : undefined}
+            className={`relative flex flex-col items-center gap-0.5 py-2 font-kit text-sm font-semibold uppercase tracking-wide ${
               g === grupo ? "text-destaque" : "text-muted"
             }`}
           >
             <span aria-hidden="true" className="icone text-2xl">{g.icone}</span>
+            {g.nome === "Bastidores" && naoLidas > 0 && (
+              <span aria-hidden="true" className="absolute top-1.5 ml-7 size-2.5 rounded-full bg-destaque ring-2 ring-pitch-950" />
+            )}
             {g.nome}
           </button>
         ))}
@@ -1628,29 +1647,38 @@ const PESO = (s) => (s.startsWith("proposta") ? 0 : s === "contrato vencendo" ? 
 function Conversas({ id, contato, onContato, onFicha }) {
   const [versao, setVersao] = useState(0);
   const { dados: lista, erro } = useDados(() => api.contatos(id), [id, versao]);
+  // quem já foi aberto aqui está lido, mesmo com a lista vinda antes (no celular ela volta ao sair da conversa)
+  const abertos = useRef(new Set()).current;
+  if (contato) abertos.add(contato);
   if (erro) return <Erro mensagem={erro} />;
   if (!lista) return null;
   const auxiliar = lista[0];
-  const atletas = lista.slice(1);
+  // quem mandou mensagem por conta própria sobe para o topo, como no WhatsApp (até a lista ser recarregada)
+  const novas = lista.slice(1).filter((c) => c.nao_lidas > 0);
+  const atletas = lista.slice(1).filter((c) => !(c.nao_lidas > 0));
+  const grupos = [
+    ["Mensagens novas", novas],
+    ...SETORES.map(([titulo, do_setor]) => [titulo, atletas.filter((c) => c.posicao != null && do_setor(c.posicao))]),
+  ];
   return (
     <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-pitch-800 lg:h-[44rem] lg:grid-cols-[21rem_1fr]">
       <nav aria-label="Contatos" className={`overflow-y-auto border-pitch-800 bg-pitch-900 lg:border-r ${contato ? "hidden lg:block" : ""}`}>
-        <Contato c={auxiliar} ativo={contato === "auxiliar"} onClick={() => onContato("auxiliar")} fixado />
-        {SETORES.map(([titulo, do_setor]) => {
-          const doSetor = atletas.filter((c) => c.posicao != null && do_setor(c.posicao));
-          return (
+        <Contato c={auxiliar} ativo={contato === "auxiliar"} lido={abertos.has("auxiliar")} onClick={() => onContato("auxiliar")} fixado />
+        {grupos.map(
+          ([titulo, doSetor]) =>
             doSetor.length > 0 && (
               <section key={titulo}>
-                <h3 className="sticky top-0 z-10 bg-pitch-900/95 px-4 pb-1 pt-4 font-kit text-sm font-semibold uppercase tracking-[0.2em] text-muted">
+                <h3 className={`sticky top-0 z-10 bg-pitch-900/95 px-4 pb-1 pt-4 font-kit text-sm font-semibold uppercase tracking-[0.2em] ${
+                  doSetor === novas ? "text-destaque" : "text-muted"
+                }`}>
                   {titulo}
                 </h3>
                 {doSetor.map((c) => (
-                  <Contato key={c.contato} c={c} ativo={contato === c.contato} onClick={() => onContato(c.contato)} />
+                  <Contato key={c.contato} c={c} ativo={contato === c.contato} lido={abertos.has(c.contato)} onClick={() => onContato(c.contato)} />
                 ))}
               </section>
-            )
-          );
-        })}
+            ),
+        )}
       </nav>
       <div className={`min-h-[36rem] bg-pitch-950 ${contato ? "" : "hidden lg:grid lg:place-items-center"}`}>
         {contato ? (
@@ -1666,8 +1694,9 @@ function Conversas({ id, contato, onContato, onFicha }) {
   );
 }
 
-function Contato({ c, ativo, onClick, fixado = false }) {
+function Contato({ c, ativo, lido, onClick, fixado = false }) {
   const sinais = [...c.sinais].sort((a, b) => PESO(a) - PESO(b)).slice(0, 2);
+  const novas = lido ? 0 : c.nao_lidas ?? 0;
   return (
     <button
       onClick={onClick}
@@ -1688,8 +1717,13 @@ function Contato({ c, ativo, onClick, fixado = false }) {
           <span className="truncate font-semibold">{c.nome}</span>
           {fixado && <span aria-label="fixado" className="icone text-base text-muted">push_pin</span>}
           {!fixado && <Posicao codigo={c.posicao} className="w-9 shrink-0 py-0 text-xs" />}
+          {novas > 0 && (
+            <span aria-label={`${novas} não lida${novas > 1 ? "s" : ""}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-full bg-destaque text-xs font-bold text-pitch-950">
+              {novas}
+            </span>
+          )}
         </span>
-        <span className="block truncate text-sm text-muted">
+        <span className={`block truncate text-sm ${novas > 0 ? "font-semibold text-chalk" : "text-muted"}`}>
           {c.ultima ?? (fixado ? "Elenco, propostas, renovações e próximo jogo" : `${c.idade ?? "?"} anos`)}
         </span>
         {sinais.length > 0 && (
@@ -1884,6 +1918,7 @@ function Atencao({ id, onFicha, onConversar, onAba }) {
         <>
           <b>{p.clube.nome}</b> quer <b>{p.nome}</b> por <Dinheiro valor={p.valor} className="font-kit text-lg font-bold" />
           {p.valor_mercado && <span className="text-muted"> · vale <Dinheiro valor={p.valor_mercado} /></span>}
+          {p.vontade && <> <SeloDeVontade vontade={p.vontade} /></>}
         </>
       ),
       acao: ["Ver proposta", () => onAba("Transferências")],
@@ -2191,14 +2226,14 @@ function Dinheiro({ valor, sinal = false, className = "" }) {
   );
 }
 
-function Transferencias({ id }) {
+function Transferencias({ id, onConversar }) {
   const { dados: t, erro } = useDados(() => api.transferencias(id), [id]);
   if (erro) return <Erro mensagem={erro} />;
   if (!t) return null;
   if (t.janelas.length === 0) {
     return (
       <>
-      <Propostas id={id} lista={t.propostas} />
+      <Propostas id={id} lista={t.propostas} onConversar={onConversar} />
       <p className="max-w-xl text-muted">
         Nenhuma mudança no elenco{t.primeira && ` desde ${dataBR(t.primeira)}`}. Depois da próxima janela de
         transferências no jogo, salve e sincronize: quem chegou e quem saiu aparece aqui, com clube e valor.
@@ -2208,7 +2243,7 @@ function Transferencias({ id }) {
   }
   return (
     <>
-      <Propostas id={id} lista={t.propostas} />
+      <Propostas id={id} lista={t.propostas} onConversar={onConversar} />
       <p className="mb-8 max-w-xl text-muted">
         O elenco de cada data do jogo sincronizada, comparado com o da data anterior. Os números são pelo clube, na
         carreira toda.
@@ -2257,7 +2292,7 @@ function Transferencias({ id }) {
 // versão, com o save já sobrescrito), a linha some.
 // Propostas de outros clubes pelos jogadores do clube. A régua compara a oferta com o valor de mercado, que é a
 // pergunta de quem decide: estão pagando mais ou menos do que ele vale?
-function Propostas({ id, lista }) {
+function Propostas({ id, lista, onConversar }) {
   if (!lista?.length) return null;
   const abertas = lista.filter((p) => p.situacao === "aberta");
   const antigas = lista.filter((p) => p.situacao !== "aberta");
@@ -2267,13 +2302,13 @@ function Propostas({ id, lista }) {
         Propostas recebidas
       </h2>
       <p className="mb-5 max-w-2xl text-sm text-muted">
-        Ofertas de outros clubes pelos seus jogadores. Responda no PES; aqui fica o histórico.
+        Ofertas de outros clubes pelos seus jogadores e o que cada um achou. Responda no PES; aqui fica o histórico.
       </p>
       {abertas.length > 0 ? (
         <ul className="grid grid-cols-1 items-start gap-5 md:grid-cols-2">
           {abertas.map((p) => (
             <li key={`${p.player_id}-${p.clube.nome}-${p.valor}`}>
-              <CartaDeProposta id={id} p={p} />
+              <CartaDeProposta id={id} p={p} onConversar={onConversar} />
             </li>
           ))}
         </ul>
@@ -2290,9 +2325,11 @@ function Propostas({ id, lista }) {
                 <span className="min-w-0 truncate">
                   {p.clube.nome} por <span className="text-chalk">{p.nome}</span>
                 </span>
+                <SeloDeVontade vontade={p.vontade} />
                 <Dinheiro valor={p.valor} className="font-kit text-lg text-chalk" />
                 <span className="text-sm">{p.situacao === "saiu" ? "· o jogador saiu do clube" : "· recusada ou expirou"}</span>
                 <span className="ml-auto text-sm">até {dataBR(p.ultima)}</span>
+                {p.fala && <p className="basis-full truncate pl-8 text-sm italic">“{p.fala}”</p>}
               </li>
             ))}
           </ul>
@@ -2302,7 +2339,75 @@ function Propostas({ id, lista }) {
   );
 }
 
-function CartaDeProposta({ id, p }) {
+const VONTADE = {
+  ficar: ["Quer ficar", "bg-neon/15 text-neon"],
+  sair: ["Quer sair", "bg-cartao/20 text-cartao"],
+  dividido: ["Dividido", "bg-gold/20 text-gold"],
+};
+
+function SeloDeVontade({ vontade }) {
+  const v = VONTADE[vontade];
+  if (!v) return null;
+  return <span className={`whitespace-nowrap rounded-sm px-1.5 font-kit text-xs font-semibold uppercase tracking-wide ${v[1]}`}>{v[0]}</span>;
+}
+
+// A palavra do jogador: a mensagem que ele mandou por conta própria quando a proposta chegou (ou acabou), com a cara
+// de uma mensagem de WhatsApp dele (o bilhete de papel é do auxiliar). Sem mensagem ainda (a IA estava fora na
+// sincronização), o botão pede na hora e abre a conversa.
+function FalaDoJogador({ id, p, onConversar }) {
+  const [ouvindo, setOuvindo] = useState(false);
+  const [erro, setErro] = useState(null);
+  const abrir = () => onConversar(String(p.player_id));
+  const ouvir = () => {
+    setOuvindo(true);
+    setErro(null);
+    api
+      .reacao(id, p.player_id)
+      .then(abrir)
+      .catch((e) => setErro(e.message))
+      .finally(() => setOuvindo(false));
+  };
+  return (
+    <div className="mt-4" aria-live="polite">
+      {p.fala ? (
+        <button onClick={abrir} className="group flex w-full items-start gap-2.5 text-left">
+          <Rosto id={p.player_id} className="size-9 shrink-0" />
+          <span className="balao-zap min-w-0 flex-1 px-3 pb-2 pt-1.5">
+            <span className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-destaque">
+              {p.nome} <SeloDeVontade vontade={p.vontade} />
+            </span>
+            <span className="mt-0.5 block text-[0.95rem] leading-snug text-chalk">{p.fala}</span>
+            <span className="mt-1.5 flex items-center justify-end gap-1 text-xs text-muted group-hover:text-destaque">
+              <span aria-hidden="true" className="icone text-base">reply</span>
+              Responder
+            </span>
+          </span>
+        </button>
+      ) : ouvindo ? (
+        <p className="flex items-center gap-2.5">
+          <Rosto id={p.player_id} className="size-9 shrink-0" />
+          <span className="sr-only">{p.nome} está escrevendo</span>
+          <span aria-hidden="true" className="balao-zap flex items-center gap-1 px-4 py-3">
+            {[0, 1, 2].map((k) => (
+              <span key={k} className="ponto-digitando" style={{ background: "var(--color-chalk)", animationDelay: `${k * 160}ms` }} />
+            ))}
+          </span>
+        </p>
+      ) : (
+        <button
+          onClick={ouvir}
+          className="flex items-center gap-2 rounded-md border border-pitch-700 px-3 py-2 font-kit text-base font-semibold uppercase tracking-wide hover:border-destaque hover:text-destaque"
+        >
+          <span aria-hidden="true" className="icone text-lg">chat</span>
+          Ouvir o jogador
+        </button>
+      )}
+      {erro && <p className="mt-2 text-sm text-cartao">{erro}</p>}
+    </div>
+  );
+}
+
+function CartaDeProposta({ id, p, onConversar }) {
   const diferenca = p.valor_mercado ? (p.valor - p.valor_mercado) / p.valor_mercado : null;
   // régua: o traço de giz é o valor de mercado; a barra vai até a oferta (no máximo o dobro do valor)
   const escala = p.valor_mercado ? Math.max(p.valor, p.valor_mercado) * 1.15 : null;
@@ -2350,6 +2455,7 @@ function CartaDeProposta({ id, p }) {
         <span className="size-2 rounded-full bg-neon" aria-hidden="true" />
         Aberta · no save desde {dataBR(p.primeira)}
       </footer>
+      <FalaDoJogador id={id} p={p} onConversar={onConversar} />
       <ParecerDoAuxiliar id={id} p={p} />
     </article>
   );
