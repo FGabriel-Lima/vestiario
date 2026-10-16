@@ -267,11 +267,21 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
             abertas[c] = max(abertas.get(c, 0), p["valor_bruto"])
     acabadas = [p for p in todas if p["situacao"] != "aberta"]
     pendentes = [p for p in acabadas if k(p) in estado and estado[k(p)][0] and not estado[k(p)][1]]
+    # oferta melhorada que o jogador já ouviu: a antiga não "acabou", fica calada
+    ouvidas = {}
+    for p in todas:
+        if p["situacao"] == "aberta" and estado.get(k(p), (None,))[0]:
+            c = (p["player_id"], p["clube"]["idx"])
+            ouvidas[c] = max(ouvidas.get(c, 0), p["valor_bruto"])
+    caladas = [p for p in pendentes if ouvidas.get((p["player_id"], p["clube"]["idx"]), 0) > p["valor_bruto"]]
+    pendentes = [p for p in pendentes if p not in caladas]
     melhoradas = [p for p in pendentes if abertas.get((p["player_id"], p["clube"]["idx"]), 0) > p["valor_bruto"]]
     anterior = {(p["player_id"], p["clube"]["idx"]): p["valor"] for p in melhoradas}
     with con:
         con.executemany("INSERT INTO vontade(carreira_id, player_id, clube_idx, valor, desfecho_avisado) "
                         "VALUES(?, ?, ?, ?, 1)", [(cid, *k(p)) for p in acabadas if k(p) not in estado])
+        con.executemany("UPDATE vontade SET desfecho_avisado = 1 WHERE carreira_id = ? AND player_id = ? "
+                        "AND clube_idx = ? AND valor = ?", [(cid, *k(p)) for p in caladas])
     novas, fins = {}, {}
     for p in todas:
         if p["situacao"] == "aberta" and k(p) not in estado:
@@ -304,7 +314,7 @@ def reagir_propostas(con: sqlite3.Connection, cid: int, pid: int | None = None) 
             novo = con.execute("SELECT t.nome, v.time_idx FROM vinculo v JOIN time t ON t.carreira_id = ? AND t.idx = v.time_idx "
                                "WHERE v.sincronizacao_id = ? AND v.player_id = ?", (cid, s["id"], jogador)).fetchone()
             # a proposta do clube novo, se houver; senão a primeira
-            valor = next((p["valor"] for p in ps if novo and p["clube"]["idx"] == novo[1]), ps[0]["valor"])
+            valor = next((p["valor"] for p in ps if novo and p["clube"]["idx"] == novo[1]), None)
             fatos = {"jogador": banco._jogador(con, cid, s, jogador)[0],
                      "despedida": _sem_nulos({"clube_novo": novo[0] if novo else None, "valor": valor})}
         else:

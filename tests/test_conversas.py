@@ -182,6 +182,23 @@ def test_jogador_vendido_se_despede(con, monkeypatch):
     assert (p["situacao"], p["fala"]) == ("saiu", "Professor, mensagem 2.")
 
 
+def test_despedida_sem_valor_de_outro_clube(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, elenco=(11, 12), outros=((), (10,)))
+    assert conversas.reagir_propostas(con, 1) == 1
+    assert chamadas[1]["despedida"] == {"clube_novo": "Clube C"}
+
+
+def test_oferta_melhorada_ja_ouvida_fica_calada(con, monkeypatch):
+    chamadas = _ia_do_jogador(monkeypatch)
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, propostas=[(1, 10, 11000)])
+    conversas.reagir_propostas(con, 1)
+    _segundo_save(con, propostas=[(1, 10, 11000)])  # a de 9000 segue fora, a de 11000 segue de pé
+    assert conversas.reagir_propostas(con, 1) == 0 and len(chamadas) == 2
+
+
 def test_proposta_que_acabou_sem_reacao_fica_calada(con, monkeypatch):
     chamadas = _ia_do_jogador(monkeypatch)
     _segundo_save(con)  # acabou antes de o jogador ter reagido (banco anterior a esta versão)
