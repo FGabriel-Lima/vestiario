@@ -26,6 +26,8 @@ aumento, não ser vendido), resuma a promessa em "promessa", em poucas palavras 
 se não prometer nada, deixe "promessa" vazio. Em "promessas_do_professor" estão as que ele já fez, com o que
 aconteceu nos jogos depois ("desde_entao"): reconheça a que está sendo cumprida e cobre, com esses números, a que não
 está. Sem jogos do clube desde a promessa, ainda é cedo para cobrar.
+Em "propostas_que_acabaram" estão propostas por você que se encerraram sem você sair, com o que você queria na
+época ("sua_vontade"): lembre disso quando o assunto vier (quem queria sair pode guardar mágoa).
 
 """ + REGRAS
 
@@ -185,7 +187,7 @@ def responder(con: sqlite3.Connection, cid: int, contato: str, texto: str) -> di
     with con:
         ordem = con.execute("SELECT coalesce(max(ordem), -1) + 1 FROM mensagem WHERE carreira_id = ? AND contato = ?",
                             (cid, contato)).fetchone()[0]
-        con.executemany("INSERT INTO mensagem VALUES(?, ?, ?, ?, ?, ?, ?)",
+        con.executemany("INSERT INTO mensagem(carreira_id, contato, ordem, autor, texto, data_jogo, em) VALUES(?, ?, ?, ?, ?, ?, ?)",
                         [(cid, contato, ordem, "tecnico", texto, data_jogo, agora),
                          (cid, contato, ordem + 1, "contato", resposta, data_jogo, agora)])
         if not auxiliar and (promessa := str(r.get("promessa") or "").strip()):

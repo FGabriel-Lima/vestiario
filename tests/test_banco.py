@@ -607,3 +607,29 @@ def test_supercopa_e_reconhecida_pela_liga_dos_dois_times(con):
     assert sorted((e["nome"], e["temporada"]) for e in banco.edicoes(con, 1)) == [
         ("FA Community Shield", "2026"), ("FA Community Shield", "2027"), ("Premier League", "2026"), ("Premier League", "2027")]
     assert banco.edicao(con, 1, "FA Community Shield|2027")["campeao"]["nome"] == "Clube C"
+
+
+def test_vontade_do_jogador_nas_propostas(con):
+    banco.gravar_nomes(con, {10: "Zagueiro"})
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-14", elenco=(10,), propostas=[(1, 10, 8320)]), AGORA)
+    assert banco.propostas(con, 1)[0]["vontade"] is None and banco.propostas(con, 1)[0]["fala"] is None
+    con.execute("INSERT INTO vontade VALUES(1, 10, 1, 8320, 'sair', 'Quero ir, professor.', 1)")
+    banco.gravar(con, "ML00000000", fazer_save("2026-01-20", elenco=(10,)), AGORA)
+    p = banco.propostas(con, 1)[0]
+    assert (p["situacao"], p["vontade"], p["fala"]) == ("encerrada", "sair", "Quero ir, professor.")
+    assert banco.fatos_do_jogador(con, 1, 10)["propostas_que_acabaram"] == [
+        {"clube": "Clube B", "valor": 8320 * MOEDA, "sua_vontade": "sair"}]
+
+
+def test_mensagem_ganha_lida_em_banco_antigo(tmp_path):
+    caminho = tmp_path / "v.db"
+    antigo = sqlite3.connect(caminho)
+    antigo.execute("CREATE TABLE mensagem(carreira_id INTEGER NOT NULL, contato TEXT NOT NULL, ordem INTEGER NOT NULL, "
+                   "autor TEXT NOT NULL, texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, "
+                   "PRIMARY KEY(carreira_id, contato, ordem))")
+    antigo.execute("INSERT INTO mensagem VALUES(1, '10', 0, 'contato', 'oi', '2026-01-01', 'x')")
+    antigo.commit()
+    antigo.close()
+    con = banco.conectar(caminho)
+    assert con.execute("SELECT lida FROM mensagem").fetchone()[0] == 1
+    con.close()

@@ -40,15 +40,23 @@ CREATE TABLE IF NOT EXISTS parecer(
   carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, clube_idx INTEGER NOT NULL,
   valor INTEGER NOT NULL, texto TEXT NOT NULL, recomendacao TEXT NOT NULL, fatos TEXT NOT NULL, em TEXT NOT NULL,
   PRIMARY KEY(carreira_id, player_id, clube_idx, valor));
+-- o que o jogador achou de cada proposta por ele (ficar, sair, dividido) e a última fala dele sobre ela;
+-- desfecho_avisado = ele já reagiu ao fim. vontade NULL = acabou antes de ele reagir, e não gera mensagem
+CREATE TABLE IF NOT EXISTS vontade(
+  carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, clube_idx INTEGER NOT NULL,
+  valor INTEGER NOT NULL, vontade TEXT, fala TEXT, desfecho_avisado INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(carreira_id, player_id, clube_idx, valor));
 -- posts do feed, publicados uma vez por data do jogo (edicao); dados = a arte do post, legenda = escrita pela IA
 CREATE TABLE IF NOT EXISTS post(
   carreira_id INTEGER NOT NULL REFERENCES carreira, edicao TEXT NOT NULL, ordem INTEGER NOT NULL, perfil TEXT NOT NULL,
   tipo TEXT NOT NULL, data TEXT NOT NULL, dados TEXT NOT NULL, legenda TEXT NOT NULL, PRIMARY KEY(carreira_id, edicao, ordem));
 DROP TABLE IF EXISTS jornal;
--- conversas com o auxiliar ('auxiliar') e os jogadores (player_id em texto); autor = 'tecnico' ou 'contato'
+-- conversas com o auxiliar ('auxiliar') e os jogadores (player_id em texto); autor = 'tecnico' ou 'contato';
+-- lida = 0 só para o que o jogador mandou por conta própria e o treinador ainda não abriu
 CREATE TABLE IF NOT EXISTS mensagem(
   carreira_id INTEGER NOT NULL REFERENCES carreira, contato TEXT NOT NULL, ordem INTEGER NOT NULL, autor TEXT NOT NULL,
-  texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, PRIMARY KEY(carreira_id, contato, ordem));
+  texto TEXT NOT NULL, data_jogo TEXT NOT NULL, em TEXT NOT NULL, lida INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY(carreira_id, contato, ordem));
 -- promessas do treinador a um jogador, achadas pela IA na conversa; a cobrança olha os jogos depois de data_jogo
 CREATE TABLE IF NOT EXISTS promessa(
   carreira_id INTEGER NOT NULL REFERENCES carreira, player_id INTEGER NOT NULL, ordem INTEGER NOT NULL,
@@ -134,6 +142,8 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
         with con:  # banco anterior aos escudos: ganha a coluna e relê todos os saves para preenchê-la
             con.execute("ALTER TABLE time ADD COLUMN pes_id INTEGER")
             con.execute("DELETE FROM arquivo")
+    if "lida" not in {r[1] for r in con.execute("PRAGMA table_info(mensagem)")}:
+        con.execute("ALTER TABLE mensagem ADD COLUMN lida INTEGER NOT NULL DEFAULT 1")  # as antigas contam como lidas
     return con
 
 
@@ -533,17 +543,21 @@ def transferencias(con: sqlite3.Connection, cid: int) -> dict:
 
 def propostas(con: sqlite3.Connection, cid: int) -> list[dict]:
     """Propostas recebidas, da mais recente para a mais antiga. Aberta = ainda no save mais recente; saiu = o
-    jogador não está mais no elenco; encerrada = recusada ou expirou (o save não diz qual)."""
+    jogador não está mais no elenco; encerrada = recusada ou expirou (o save não diz qual).
+    vontade e fala = o que o jogador achou (None se ele não reagiu)."""
     s = _ultima(con, cid)
     elenco = {r[0]: r[1] for r in con.execute("SELECT player_id, valor FROM elenco WHERE sincronizacao_id = ?", (s["id"],))}
     lista = []
     for r in con.execute(
             "SELECT p.player_id, coalesce(j.nome, 'Jogador #' || p.player_id) AS nome, j.posicao, p.valor, p.primeira,"
-            " p.ultima, p.clube_idx, t.nome AS clube, t.pes_id AS escudo, pa.texto, pa.recomendacao, pa.fatos"
+            " p.ultima, p.clube_idx, t.nome AS clube, t.pes_id AS escudo, pa.texto, pa.recomendacao, pa.fatos,"
+            " v.vontade, v.fala"
             " FROM proposta p LEFT JOIN jogador j ON j.player_id = p.player_id"
             " LEFT JOIN time t ON t.carreira_id = p.carreira_id AND t.idx = p.clube_idx"
             " LEFT JOIN parecer pa ON pa.carreira_id = p.carreira_id AND pa.player_id = p.player_id"
-            " AND pa.clube_idx = p.clube_idx AND pa.valor = p.valor WHERE p.carreira_id = ?"
+            " AND pa.clube_idx = p.clube_idx AND pa.valor = p.valor"
+            " LEFT JOIN vontade v ON v.carreira_id = p.carreira_id AND v.player_id = p.player_id"
+            " AND v.clube_idx = p.clube_idx AND v.valor = p.valor WHERE p.carreira_id = ?"
             " ORDER BY p.ultima DESC, p.valor DESC", (cid,)):
         situacao = "aberta" if r["ultima"] == s["data_jogo"] else "saiu" if r["player_id"] not in elenco else "encerrada"
         mercado = elenco.get(r["player_id"])
@@ -552,7 +566,7 @@ def propostas(con: sqlite3.Connection, cid: int) -> list[dict]:
                       "ultima": r["ultima"], "situacao": situacao, "valor_bruto": r["valor"],
                       "clube": {"idx": r["clube_idx"], "nome": r["clube"], "escudo": r["escudo"]},
                       "parecer": {"parecer": r["texto"], "recomendacao": r["recomendacao"], "fatos": json.loads(r["fatos"])}
-                      if r["texto"] else None})
+                      if r["texto"] else None, "vontade": r["vontade"], "fala": r["fala"]})
     return lista
 
 
@@ -657,12 +671,16 @@ def fatos_do_jogador(con: sqlite3.Connection, cid: int, pid: int) -> dict | None
         ultimos.append(jogo)
     if ultimos:
         jogador["ultimos_jogos"] = ultimos
-    abertas = [{"clube": x["clube"]["nome"], "valor": x["valor"]} for x in propostas(con, cid)
-               if x["player_id"] == pid and x["situacao"] == "aberta"]
+    dele = [x for x in propostas(con, cid) if x["player_id"] == pid]
+    abertas = [{"clube": x["clube"]["nome"], "valor": x["valor"]} for x in dele if x["situacao"] == "aberta"]
+    acabaram = [{"clube": x["clube"]["nome"], "valor": x["valor"], "sua_vontade": x["vontade"]}
+                for x in dele if x["situacao"] != "aberta" and x["vontade"]][:3]
     proximo = next((p for p in partidas(con, cid) if not p["disputada"] and p["data"] > s["data_jogo"]), None)
     fatos = {"jogador": jogador, "elenco_na_mesma_posicao": _colegas(con, s, pid, posicao), "clube": _clube(con, s)}
     if abertas:
         fatos["propostas_abertas"] = abertas
+    if acabaram:
+        fatos["propostas_que_acabaram"] = acabaram
     if feitas := promessas(con, cid, pid):
         fatos["promessas_do_professor"] = feitas
     if proximo:
