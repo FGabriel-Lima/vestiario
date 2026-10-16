@@ -787,3 +787,43 @@ def reuniao(con: sqlite3.Connection, cid: int, texto: str) -> None:
         con.executemany("INSERT INTO reuniao VALUES(?, ?, ?, ?, ?, ?, ?, ?)", [
             (cid, clube, ano, ordem, "tecnico", texto, None, agora),
             (cid, clube, ano, ordem + 1, "presidente", resposta, json.dumps(ofertas), agora)])
+
+
+def estado(con: sqlite3.Connection, cid: int) -> dict:
+    """Tudo o que a aba Diretoria mostra."""
+    s, clube, ano, acordo = _do_ano(con, cid)
+    conf = confianca(con, cid, clube)
+    ativo = _ultimato_ativo(con, cid, clube)
+    return {"ano": ano, "confianca": conf, "historico": historico(con, cid, clube),
+            "demitido": demitido(con, cid, clube), "pendencias": pendencias(con, cid),
+            "perfil": acordo["perfil"] if acordo else perfil(con, cid),
+            "acordo": acordo and {"estado": acordo["estado"], "assinado_data": acordo["assinado_data"],
+                                  "itens": avaliar(con, cid, acordo, s["data_jogo"], registrar=False)},
+            "cardapio": cardapio(acordo, conf) if acordo else [],
+            "mensagens": mensagens(con, cid, clube, ano), "revisao": revisao(con, cid),
+            "ultimato": situacao_do_ultimato(banco.partidas(con, cid), json.loads(ativo["jogos"]), clube) if ativo else None}
+
+
+def fatos_da_diretoria(con: sqlite3.Connection, cid: int) -> dict | None:
+    """O acordo e a confiança para o auxiliar técnico (só fatos do banco)."""
+    s, clube, ano, acordo = _do_ano(con, cid)
+    if acordo is None:
+        return None
+    fatos = {"confianca_da_diretoria": confianca(con, cid, clube), "acordo_do_ano": acordo["estado"],
+             "exigencias": [{"exigencia": i["descricao"], "estado": i["estado"].replace("_", " "), "andamento": i["uso"]}
+                            for i in avaliar(con, cid, acordo, s["data_jogo"], registrar=False)]}
+    if d := demitido(con, cid, clube):
+        fatos["demitido_em"] = d
+    return fatos
+
+
+def alertas(con: sqlite3.Connection, cid: int) -> list[dict]:
+    """Pendências e itens em risco ou quebrados, para o quadro Precisa de atenção."""
+    lista = pendencias(con, cid)
+    s, clube, ano, acordo = _do_ano(con, cid)
+    if acordo and not demitido(con, cid, clube):
+        for i in avaliar(con, cid, acordo, s["data_jogo"], registrar=False):
+            if i["estado"] in ("em_risco", "quebrado"):
+                texto = i["descricao"][0].upper() + i["descricao"][1:]
+                lista.append({"tipo": i["estado"], "texto": f"{texto}: {i['uso']}" if i["uso"] else texto})
+    return lista

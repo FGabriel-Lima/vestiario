@@ -248,7 +248,7 @@ def test_ficha_e_atencao(cliente, monkeypatch):
     f = cliente.get("/api/carreiras/1/jogadores/10").json()
     assert f["total"]["gols"] == 2 and isinstance(f["sinais"], list)
     assert cliente.get("/api/carreiras/1/jogadores/999").status_code == 404
-    assert set(cliente.get("/api/carreiras/1/atencao").json()) == {"propostas", "contratos", "promessas", "sem_espaco"}
+    assert set(cliente.get("/api/carreiras/1/atencao").json()) == {"propostas", "contratos", "promessas", "sem_espaco", "diretoria"}
 
 
 def test_reacao_a_proposta(cliente, monkeypatch):
@@ -278,3 +278,22 @@ def test_sincronizar_sem_ia_avisa_das_mensagens(cliente, monkeypatch):
     (api.SAVES / "ML00000000").write_bytes(b"x")
     avisos = cliente.post("/api/sincronizar").json()["avisos"]
     assert any("Mensagens dos jogadores" in a for a in avisos)
+
+
+def test_diretoria(cliente, monkeypatch):
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: fazer_save(
+        "2026-01-10", [partida("2026-02-01", 0, 1, comp=29, rodada=0), partida("2026-03-01", 1, 0, comp=29, rodada=1)],
+        competicoes={29: "Brasileirão Série A"}, orcamento=100_000))
+    (api.SAVES).mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    cliente.post("/api/sincronizar")
+    d = cliente.get("/api/carreiras/1/diretoria").json()
+    assert d["acordo"]["estado"] == "proposto" and d["confianca"] == 60
+    oferta = next(o["id"] for o in d["cardapio"] if o["preco"].get("confianca", 0) < 0)
+    d = cliente.post("/api/carreiras/1/diretoria/aceitar", json={"oferta": oferta}).json()
+    assert d["confianca"] == 52  # sem valores de mercado, o porte é médio: 8 de confiança
+    assert cliente.post("/api/carreiras/1/diretoria/aceitar", json={"oferta": "nao-existe"}).status_code == 400
+    assert cliente.post("/api/carreiras/1/diretoria/reuniao", json={"texto": "oi"}).status_code == 503
+    assert cliente.post("/api/carreiras/1/diretoria/assinar").json()["acordo"]["estado"] == "assinado"
+    assert cliente.post("/api/carreiras/1/diretoria/assinar").status_code == 409
+    assert cliente.post("/api/carreiras/1/diretoria/revisao", json={"escolha": None}).status_code == 409

@@ -2,7 +2,7 @@
 import sqlite3
 from datetime import date, datetime
 
-from . import banco, ia
+from . import banco, diretoria, ia
 
 HISTORICO = 12  # mensagens anteriores que a IA recebe
 
@@ -33,7 +33,8 @@ Em "propostas_que_acabaram" estão propostas por você que se encerraram sem voc
 
 SISTEMA_AUXILIAR = """Você é o auxiliar técnico do clube numa carreira de Master League do PES, conversando com o \
 treinador por mensagem. Analise o elenco e o momento do clube com franqueza, como um auxiliar de confiança: quem
-joga pouco, quem está em boa ou má fase, contratos vencendo, propostas abertas, próximos jogos e orçamento.
+joga pouco, quem está em boa ou má fase, contratos vencendo, propostas abertas, próximos jogos, orçamento e, quando
+estiver nos fatos, o acordo com a diretoria (exigências, andamento e confiança).
 Sugira caminhos, mas a decisão é do treinador.
 
 """ + REGRAS
@@ -135,6 +136,7 @@ def atencao(con: sqlite3.Connection, cid: int) -> dict:
     limite = _seis_meses(s["data_jogo"])
     prometidos = {r[0] for r in con.execute("SELECT DISTINCT player_id FROM promessa WHERE carreira_id = ?", (cid,))}
     return {
+        "diretoria": diretoria.alertas(con, cid),
         "propostas": [{k: p[k] for k in ("player_id", "nome", "clube", "valor", "valor_mercado", "vontade")} for p in abertas],
         "contratos": sorted(({"player_id": l["player_id"], "nome": l["nome"], "fim": c["fim"], "emprestimo": c["emprestimo"]}
                              for l in elenco if (c := l["contrato"]) and c["fim"] <= limite), key=lambda x: (x["fim"], x["nome"])),
@@ -156,6 +158,8 @@ def _atalhos(contato: str, fatos: dict) -> list[str]:
             a.append("E as propostas que chegaram?")
         if fatos.get("proximos_jogos"):
             a.append("Como encarar o próximo jogo?")
+        if fatos.get("diretoria"):
+            a.append("Como estamos com a diretoria?")
         return a
     j = fatos["jogador"]
     a = ["Como você está?"]
@@ -169,7 +173,10 @@ def _atalhos(contato: str, fatos: dict) -> list[str]:
 
 def _fatos(con: sqlite3.Connection, cid: int, contato: str) -> dict | None:
     if contato == "auxiliar":
-        return banco.fatos_do_clube(con, cid)
+        fatos = banco.fatos_do_clube(con, cid)
+        if d := diretoria.fatos_da_diretoria(con, cid):
+            fatos["diretoria"] = d
+        return fatos
     if not contato.isdigit():
         return None
     fatos = banco.fatos_do_jogador(con, cid, int(contato))

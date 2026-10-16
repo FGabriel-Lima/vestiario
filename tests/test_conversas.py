@@ -275,3 +275,12 @@ def test_ia_fora_nao_grava_reacao(con, monkeypatch):
         conversas.reagir_propostas(con, 1)
     assert banco.propostas(con, 1)[0]["vontade"] is None
     assert conversas.contatos(con, 1)[3]["nao_lidas"] == 0
+
+
+def test_auxiliar_conhece_o_acordo(con):
+    from vestiario import diretoria
+    diretoria.atualizar(con, 1)
+    c = conversas.conversa(con, 1, "auxiliar")
+    assert c["fatos"]["diretoria"]["acordo_do_ano"] == "proposto"
+    assert "Como estamos com a diretoria?" in c["atalhos"]
+    assert conversas.atencao(con, 1)["diretoria"][0]["tipo"] == "reuniao"

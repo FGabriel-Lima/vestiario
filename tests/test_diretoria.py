@@ -411,3 +411,20 @@ def test_reuniao_sem_ia_nao_grava(con):
     with pytest.raises(ia.IAIndisponivel):
         diretoria.reuniao(con, 1, "Oi, presidente.")
     assert diretoria.mensagens(con, 1, 0, 2026) == []
+
+
+def test_estado_para_a_tela(con):
+    acordo_proposto(con)
+    e = diretoria.estado(con, 1)
+    assert (e["ano"], e["confianca"], e["acordo"]["estado"], e["demitido"]) == (2026, 60, "proposto", None)
+    assert e["cardapio"] and e["pendencias"][0]["tipo"] == "reuniao"
+    assert all("descricao" in i and "uso" in i for i in e["acordo"]["itens"])
+    assert diretoria.fatos_da_diretoria(con, 1)["acordo_do_ano"] == "proposto"
+    assert diretoria.alertas(con, 1)[0]["tipo"] == "reuniao"
+
+
+def test_estado_sem_acordo_ainda(con):
+    sincronizar(con, "2026-01-10", temporada(2026, 0))
+    e = diretoria.estado(con, 1)
+    assert e["acordo"] is None and e["cardapio"] == [] and e["perfil"]["porte"] == "grande"
+    assert diretoria.fatos_da_diretoria(con, 1) is None

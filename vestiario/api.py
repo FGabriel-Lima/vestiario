@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auxiliar, banco, conversas, feed, ia
+from . import auxiliar, banco, conversas, diretoria, feed, ia
 from .sincronizar import sincronizar
 
 _casa = Path.home()
@@ -315,6 +315,60 @@ def post_conversa(cid: int, contato: str, m: Mensagem):
         if c is None:
             raise HTTPException(404, "Contato não encontrado no elenco")
         return c
+
+
+class Oferta(BaseModel):
+    oferta: str
+
+
+class Escolha(BaseModel):
+    escolha: str | None = None
+
+
+def _na_diretoria(con, cid: int, acao) -> dict:
+    """Roda uma ação da diretoria e devolve a aba atualizada; os erros viram respostas HTTP."""
+    _carreira(con, cid)
+    try:
+        acao()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LookupError as e:
+        raise HTTPException(409, str(e))
+    except ia.IAIndisponivel as e:
+        raise HTTPException(503, str(e))
+    return diretoria.estado(con, cid)
+
+
+@app.get("/api/carreiras/{cid}/diretoria")
+def get_diretoria(cid: int):
+    """Confiança, acordo do ano com o estado de cada exigência, cardápio, reunião, revisão e ultimato."""
+    with _con() as con:
+        _carreira(con, cid)
+        return diretoria.estado(con, cid)
+
+
+@app.post("/api/carreiras/{cid}/diretoria/reuniao")
+def post_diretoria_reuniao(cid: int, m: Mensagem):
+    with _con() as con:
+        return _na_diretoria(con, cid, lambda: diretoria.reuniao(con, cid, m.texto))
+
+
+@app.post("/api/carreiras/{cid}/diretoria/aceitar")
+def post_diretoria_aceitar(cid: int, o: Oferta):
+    with _con() as con:
+        return _na_diretoria(con, cid, lambda: diretoria.aceitar(con, cid, o.oferta))
+
+
+@app.post("/api/carreiras/{cid}/diretoria/assinar")
+def post_diretoria_assinar(cid: int):
+    with _con() as con:
+        return _na_diretoria(con, cid, lambda: diretoria.assinar(con, cid))
+
+
+@app.post("/api/carreiras/{cid}/diretoria/revisao")
+def post_diretoria_revisao(cid: int, e: Escolha):
+    with _con() as con:
+        return _na_diretoria(con, cid, lambda: diretoria.responder_revisao(con, cid, e.escolha))
 
 
 @app.get("/api/carreiras/{cid}/lendas")
