@@ -383,3 +383,31 @@ def test_revisao_com_opcao_invalida(con):
     diretoria.atualizar(con, 1)
     with pytest.raises(ValueError):
         diretoria.responder_revisao(con, 1, "rev:999")
+
+
+def test_reuniao_so_oferece_o_que_esta_no_cardapio(con, monkeypatch):
+    a = acordo_proposto(con)
+    n = indice(a, "livres")
+    recebido = []
+
+    def falso(sistema, fatos, esquema):
+        recebido.append(fatos)
+        return {"resposta": "Professor, dá para liberar mais um livre.",
+                "ofertas": [f"{n}:confianca", "inventada", f"{n}:confianca"]}
+
+    monkeypatch.setattr(ia, "responder", falso)
+    diretoria.reuniao(con, 1, "Preciso de mais um agente livre.")
+    ms = diretoria.mensagens(con, 1, 0, 2026)
+    assert [m["autor"] for m in ms] == ["tecnico", "presidente"]
+    assert ms[1]["ofertas"] == [f"{n}:confianca"]  # a inventada sai, a repetida também
+    assert any(c["id"] == f"{n}:confianca" for c in recebido[0]["cardapio"])
+    assert recebido[0]["mensagem_do_tecnico"] == "Preciso de mais um agente livre."
+    with pytest.raises(ValueError):
+        diretoria.reuniao(con, 1, "   ")
+
+
+def test_reuniao_sem_ia_nao_grava(con):
+    acordo_proposto(con)
+    with pytest.raises(ia.IAIndisponivel):
+        diretoria.reuniao(con, 1, "Oi, presidente.")
+    assert diretoria.mensagens(con, 1, 0, 2026) == []

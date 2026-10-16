@@ -727,3 +727,63 @@ def responder_revisao(con: sqlite3.Connection, cid: int, escolha: str | None) ->
             _evento(con, cid, clube, f"revisao:{ano}", s["data_jogo"], "Revisão: o técnico recusou o aperto da diretoria", -5)
         con.execute("UPDATE acordo SET revisao_feita = 1 WHERE carreira_id = ? AND clube_idx = ? AND ano = ?",
                     (cid, clube, ano))
+
+
+SISTEMA_PRESIDENTE = """Você é o presidente de um clube de futebol numa carreira de Master League do PES, em reunião \
+com o técnico (o usuário) para fechar o acordo da temporada: as metas e as regras de mercado que a diretoria vai cobrar.
+- O acordo proposto, o perfil do clube e a confiança da diretoria estão nos fatos.
+- Você só pode oferecer mudanças que estejam no "cardapio", pelo "id", no máximo 3 por resposta. Cada mudança já traz
+  o preço; nunca ofereça outra coisa nem mude o preço. Se o técnico pedir algo fora do cardápio, diga que a diretoria
+  não aceita.
+- Tom: paciente com clube pequeno, exigente com clube grande, seco quando o clube está em crise; com confiança baixa,
+  desconfiado. Fale como um presidente de clube brasileiro, sem exagero.
+- Use SOMENTE os fatos. Não invente números, jogadores, dívidas, conselho, torcida, eleições nem acontecimentos.
+- Não diga o nome de ninguém; você é "o presidente" e chama o técnico de "professor".
+- Responda em português do Brasil, de 1 a 4 frases."""
+
+ESQUEMA_REUNIAO = {"type": "OBJECT", "properties": {"resposta": {"type": "STRING"},
+                                                    "ofertas": {"type": "ARRAY", "items": {"type": "STRING"}}},
+                   "required": ["resposta"]}
+HISTORICO = 12
+
+
+def mensagens(con: sqlite3.Connection, cid: int, clube: int, ano: int) -> list[dict]:
+    return [{"autor": r[0], "texto": r[1], "ofertas": json.loads(r[2]) if r[2] else []} for r in con.execute(
+        "SELECT autor, texto, ofertas FROM reuniao WHERE carreira_id = ? AND clube_idx = ? AND ano = ? ORDER BY ordem",
+        (cid, clube, ano))]
+
+
+def _perfil_para_ia(p: dict) -> dict:
+    return {"clube": p["clube"], "porte": p["porte"], "divisao": p["divisao"], "rebaixado": p["rebaixado"],
+            "promovido": p["promovido"], "em_crise": p["crise"], "temporada_anterior": p["momento"]}
+
+
+def reuniao(con: sqlite3.Connection, cid: int, texto: str) -> None:
+    """Uma rodada da conversa: grava a fala do técnico e a do presidente, com as ofertas válidas do cardápio."""
+    texto = texto.strip()
+    if not texto:
+        raise ValueError("Mensagem vazia")
+    s, clube, ano, acordo = _do_ano(con, cid)
+    if acordo is None or acordo["estado"] != "proposto":
+        raise LookupError("Não há acordo em negociação")
+    conf = confianca(con, cid, clube)
+    opcoes = cardapio(acordo, conf)
+    anteriores = mensagens(con, cid, clube, ano)[-HISTORICO:]
+    r = ia.responder(SISTEMA_PRESIDENTE, {
+        "perfil": _perfil_para_ia(acordo["perfil"]), "confianca_da_diretoria": conf,
+        "acordo_proposto": [descrever(i) for i in acordo["itens"]],
+        "cardapio": [{"id": o["id"], "mudanca": o["texto"]} for o in opcoes],
+        "conversa_ate_agora": [{"autor": m["autor"], "texto": m["texto"]} for m in anteriores],
+        "mensagem_do_tecnico": texto}, ESQUEMA_REUNIAO)
+    resposta = str(r.get("resposta", "")).strip()
+    if not resposta:
+        raise ia.IAIndisponivel("A resposta veio vazia. Tente de novo.")
+    ids = {o["id"] for o in opcoes}
+    ofertas = list(dict.fromkeys(str(i) for i in r.get("ofertas") or [] if str(i) in ids))[:3]
+    agora = datetime.now().isoformat(timespec="seconds")
+    with con:
+        ordem = con.execute("SELECT coalesce(max(ordem), -1) + 1 FROM reuniao WHERE carreira_id = ? AND clube_idx = ? "
+                            "AND ano = ?", (cid, clube, ano)).fetchone()[0]
+        con.executemany("INSERT INTO reuniao VALUES(?, ?, ?, ?, ?, ?, ?, ?)", [
+            (cid, clube, ano, ordem, "tecnico", texto, None, agora),
+            (cid, clube, ano, ordem + 1, "presidente", resposta, json.dumps(ofertas), agora)])
