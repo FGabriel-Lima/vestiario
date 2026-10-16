@@ -90,3 +90,109 @@ def perfil(con: sqlite3.Connection, cid: int, ano: int | None = None) -> dict:
             "folha_semanal": f["folha_semanal"], "receitas": receitas or None,
             "maiores_salarios": [c[0] for c in contratos[:5]],
             "momento": json.loads(ultimo[0])["momento"] if ultimo else "estreia", "faltou": faltou}
+
+
+# Proposta base por porte e o que cada situação muda (spec, seção 2). meta_liga = posição; meta_copa = se o porte
+# tem meta de copa; contratacoes = (janela de janeiro, janela do meio); teto_contratacao = % do orçamento;
+# vender_para_comprar = %; folha_maxima = % da folha atual; vender_salarios = quantos dos 5 maiores salários.
+# None = o item não entra.
+BASE = {
+    "grande": {"meta_liga": 4, "meta_copa": True, "contratacoes": (4, 3), "teto_contratacao": 50,
+               "vender_para_comprar": None, "livres": 2, "emprestimos": 2, "folha_maxima": None, "vender_salarios": None},
+    "medio": {"meta_liga": 10, "meta_copa": True, "contratacoes": (3, 2), "teto_contratacao": 40,
+              "vender_para_comprar": 50, "livres": 1, "emprestimos": 2, "folha_maxima": None, "vender_salarios": None},
+    "pequeno": {"meta_liga": 16, "meta_copa": False, "contratacoes": (2, 2), "teto_contratacao": 30,
+                "vender_para_comprar": 75, "livres": 1, "emprestimos": 1, "folha_maxima": None, "vender_salarios": None},
+}
+SITUACOES = [  # nesta ordem; um valor da situação substitui o do porte; chave ausente = o porte fica
+    ("promovido", {"meta_liga": 16, "contratacoes": (5, 3), "teto_contratacao": 40, "livres": 2, "emprestimos": 3}),
+    ("rebaixado", {"meta_liga": 4, "contratacoes": (2, 1), "teto_contratacao": 25, "vender_para_comprar": 100,
+                   "livres": 1, "emprestimos": 1, "folha_maxima": 80, "vender_salarios": 2}),
+    ("crise", {"contratacoes": (1, 1), "teto_contratacao": 20, "vender_para_comprar": 100, "livres": 1,
+               "emprestimos": 1, "folha_maxima": 100, "vender_salarios": 1}),
+]
+FAIXA = {"meta_liga": (2, 1), "meta_copa": (1, 1), "contratacoes": (2, 1), "teto_contratacao": (20, 10),
+         "vender_para_comprar": (25, 25), "livres": (1, 1), "emprestimos": (1, 1), "folha_maxima": (10, 5),
+         "vender_salarios": (1, 1)}  # (amplitude em volta do valor base, passo)
+AFROUXA = {"meta_liga": 1, "meta_copa": -1, "contratacoes": 1, "teto_contratacao": 1, "vender_para_comprar": -1,
+           "livres": 1, "emprestimos": 1, "folha_maxima": 1, "vender_salarios": -1}  # sentido de afrouxar
+LIMITES = {"meta_liga": (1, 20), "meta_copa": (0, 5), "contratacoes": (0, 10), "teto_contratacao": (0, 100),
+           "vender_para_comprar": (0, 100), "livres": (0, 10), "emprestimos": (0, 10), "folha_maxima": (50, 150),
+           "vender_salarios": (0, 5)}
+JANELA = {1: "de janeiro", 2: "do meio do ano"}
+
+
+def _item(tipo: str, valor: int, **extra) -> dict:
+    return {"tipo": tipo, "valor": valor, "base": valor, **extra}
+
+
+def proposta(p: dict) -> list[dict]:
+    """Os itens do acordo para o perfil (spec, seção 2)."""
+    v = dict(BASE[p["porte"]])
+    for marca, muda in SITUACOES:
+        if p[marca]:
+            v.update(muda)
+    itens = []
+    if p["liga"] and v["meta_liga"] is not None:
+        itens.append(_item("meta_liga", min(v["meta_liga"], len(p["liga"]["times"]))))
+    if v["meta_copa"]:
+        for c in p["copas"]:
+            itens.append(_item("meta_copa", 2 if c["nome"] == "Copa Libertadores" else 1, copa=c["nome"],
+                               chave=c["chave"]))
+    for janela, n in enumerate(v["contratacoes"], start=1):
+        itens.append(_item("contratacoes", n, janela=janela))
+    if p["orcamento"] is not None:
+        itens.append(_item("teto_contratacao", v["teto_contratacao"], orcamento=p["orcamento"]))
+    if v["vender_para_comprar"] is not None:
+        itens.append(_item("vender_para_comprar", v["vender_para_comprar"]))
+    itens.append(_item("livres", v["livres"]))
+    itens.append(_item("emprestimos", v["emprestimos"]))
+    if v["folha_maxima"] is not None and p["folha_semanal"]:
+        itens.append(_item("folha_maxima", v["folha_maxima"], folha=p["folha_semanal"]))
+    if v["vender_salarios"] and p["maiores_salarios"]:
+        itens.append(_item("vender_salarios", v["vender_salarios"], jogadores=p["maiores_salarios"]))
+    return itens
+
+
+def reais(item: dict) -> int | None:
+    """O valor em R$ dos itens em porcentagem: o teto por contratação e a folha máxima."""
+    if item["tipo"] == "teto_contratacao":
+        return round(item["orcamento"] * item["valor"] / 100)
+    if item["tipo"] == "folha_maxima":
+        return round(item["folha"] * item["valor"] / 100)
+    return None
+
+
+def _dinheiro(v: int) -> str:
+    if abs(v) >= 1_000_000:
+        return f"R$ {v / 1_000_000:.1f} mi".replace(".0 mi", " mi").replace(".", ",")
+    return f"R$ {round(v / 1000)} mil"
+
+
+def _plural(n: int, um: str, varios: str) -> str:
+    return f"{n} {um if n == 1 else varios}"
+
+
+def descrever(item: dict, valor: int | None = None) -> str:
+    """A exigência em uma frase (com outro valor, para descrever uma mudança)."""
+    v = item["valor"] if valor is None else valor
+    t, x = item["tipo"], {**item, "valor": v}
+    if t == "meta_liga":
+        return f"terminar a liga em {v}º ou melhor"
+    if t == "meta_copa":
+        fase = FASES_COPA[v]
+        artigo = "o" if v == 5 else "a" if v in (3, 4) else "as"
+        return f"{item['copa']}: chegar {'ao' if artigo == 'o' else 'à' if artigo == 'a' else 'às'} {fase}"
+    if t == "contratacoes":
+        return f"até {_plural(v, 'contratação', 'contratações')} na janela {JANELA[item['janela']]}"
+    if t == "teto_contratacao":
+        return f"nenhuma compra acima de {_dinheiro(reais(x))} ({v}% do orçamento)"
+    if t == "vender_para_comprar":
+        return f"vendas pagando pelo menos {v}% do gasto com compras no ano"
+    if t == "livres":
+        return f"até {_plural(v, 'agente livre', 'agentes livres')} no ano"
+    if t == "emprestimos":
+        return f"até {_plural(v, 'empréstimo', 'empréstimos')} de entrada no ano"
+    if t == "folha_maxima":
+        return f"folha semanal de até {_dinheiro(reais(x))}"
+    return f"vender {v} dos 5 maiores salários até 30/09"

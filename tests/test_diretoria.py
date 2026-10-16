@@ -77,3 +77,49 @@ def test_crise_pela_folha_ou_pela_folga(con):
                 receitas={"tv": 10_000_000}, folga_salarial=100)
     p = diretoria.perfil(con, 1)
     assert p["crise"] is True and p["maiores_salarios"] == [10]
+
+
+PERFIL = {"porte": "medio", "promovido": False, "rebaixado": False, "crise": False, "orcamento": 1_000_000,
+          "folha_semanal": 50_000, "maiores_salarios": [10, 11, 12, 13, 14], "liga": {"times": list(range(20))},
+          "copas": [{"nome": "Copa Libertadores", "chave": "L|2026"}, {"nome": "Copa do Brasil", "chave": "C|2026"}]}
+
+
+def valores(itens):
+    return {(i["tipo"], i.get("janela") or i.get("copa")): i["valor"] for i in itens}
+
+
+def test_proposta_de_clube_medio():
+    assert valores(diretoria.proposta(PERFIL)) == {
+        ("meta_liga", None): 10, ("meta_copa", "Copa Libertadores"): 2, ("meta_copa", "Copa do Brasil"): 1,
+        ("contratacoes", 1): 3, ("contratacoes", 2): 2, ("teto_contratacao", None): 40,
+        ("vender_para_comprar", None): 50, ("livres", None): 1, ("emprestimos", None): 2}
+
+
+def test_crise_sobrescreve_o_porte():
+    v = valores(diretoria.proposta({**PERFIL, "crise": True}))
+    assert (v[("meta_liga", None)], v[("contratacoes", 1)], v[("contratacoes", 2)], v[("vender_para_comprar", None)],
+            v[("folha_maxima", None)], v[("vender_salarios", None)]) == (10, 1, 1, 100, 100, 1)
+
+
+def test_rebaixado_quer_subir_e_vender_salarios():
+    itens = diretoria.proposta({**PERFIL, "porte": "pequeno", "rebaixado": True})
+    v = valores(itens)
+    assert (v[("meta_liga", None)], v[("folha_maxima", None)], v[("vender_salarios", None)]) == (4, 80, 2)
+    assert ("meta_copa", "Copa do Brasil") not in v  # clube pequeno não tem meta de copa
+    assert diretoria.reais(next(i for i in itens if i["tipo"] == "folha_maxima")) == 40_000
+    assert diretoria.reais(next(i for i in itens if i["tipo"] == "teto_contratacao")) == 250_000
+
+
+def test_meta_da_liga_nao_passa_do_numero_de_times():
+    assert valores(diretoria.proposta({**PERFIL, "liga": {"times": [0, 1, 2]}}))[("meta_liga", None)] == 3
+
+
+def test_descricao_dos_itens():
+    textos = [diretoria.descrever(i) for i in diretoria.proposta({**PERFIL, "crise": True})]
+    assert "terminar a liga em 10º ou melhor" in textos
+    assert "até 1 contratação na janela de janeiro" in textos
+    assert "nenhuma compra acima de R$ 200 mil (20% do orçamento)" in textos
+    assert "folha semanal de até R$ 50 mil" in textos
+    assert "Copa Libertadores: chegar às quartas de final" in textos
+    assert "vender 1 dos 5 maiores salários até 30/09" in textos
+    assert diretoria._dinheiro(38_009_850) == "R$ 38 mi" and diretoria._dinheiro(1_250_000) == "R$ 1,2 mi"
