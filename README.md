@@ -27,6 +27,10 @@ Os dados vêm do save do jogo, sem cadastro manual. É só salvar no PES e clica
   - **Conversas:** com o auxiliar técnico e com cada jogador do elenco, que responde com base nos próprios números
     (minutos, nota, contrato, propostas). O que você promete fica guardado, e o jogador cobra com os números dos
     jogos seguintes.
+  - **Diretoria:** no início de cada ano, a diretoria olha o clube no save (porte pelo valor do elenco, divisão,
+    finanças) e propõe um acordo com metas e regras de mercado. Você negocia com o presidente, e cada concessão tem
+    preço. O Vestiário fiscaliza o acordo a cada sincronização e mexe na confiança da diretoria; com ela no fim vem
+    um ultimato, e depois a demissão.
   - A IA não inventa número nem fato: recebe só o que está no banco, e o que falta vai dito como desconhecido.
 - **Usa os nomes e os escudos do seu patch.** Os nomes dos jogadores e os escudos dos times saem dos arquivos do patch instalado, na mesma ordem em que o jogo os carrega.
 
@@ -136,6 +140,7 @@ vestiario/
   auxiliar.py      parecer do auxiliar sobre as propostas
   feed.py          posts do feed
   conversas.py     conversas com o auxiliar e os jogadores
+  diretoria.py     acordo anual, fiscalização e confiança da diretoria
   api.py           API local (FastAPI)
 web/               telas (React, Vite e Tailwind)
 tests/
