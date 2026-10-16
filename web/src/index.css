@@ -351,7 +351,7 @@ button:focus-visible > .balao-zap {
   background: var(--color-pitch-700);
 }
 
- de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
+/* Súmula: folha de papel presa por um pedaço de fita crepe (o .fita do título fica para fora da borda) */
 .sumula {
   width: min(100% - 2rem, 46rem);
   max-width: none;

@@ -75,15 +75,23 @@ export default function Carreira({ id, onVoltar }) {
   const [ficha, setFicha] = useState(null);
   const [contatos, setContatos] = useState([]);
   useEffect(() => {
-    api.contatos(id).then(setContatos).catch(() => setContatos([]));
+    let vivo = true; // a resposta de uma troca anterior não sobrescreve a mais nova
+    api
+      .contatos(id)
+      .then((l) => vivo && setContatos(l))
+      .catch(() => vivo && setContatos([]));
+    return () => {
+      vivo = false;
+    };
   }, [id, aba, contato]);
   // a conversa aberta já foi lida, mesmo que a lista tenha vindo antes de o servidor marcar
   const naoLidas = contatos.reduce((n, c) => n + (aba === "Conversas" && c.contato === contato ? 0 : c.nao_lidas ?? 0), 0);
   const contador = (a) =>
     a === "Conversas" &&
     naoLidas > 0 && (
-      <span aria-label={`${naoLidas} não lida${naoLidas > 1 ? "s" : ""}`} className="ml-2 rounded-full bg-destaque px-1.5 align-middle font-sans text-xs font-bold not-italic text-pitch-950">
+      <span className="ml-2 rounded-full bg-destaque px-1.5 align-middle font-sans text-xs font-bold not-italic text-pitch-950">
         {naoLidas}
+        <span className="sr-only"> não lida{naoLidas > 1 ? "s" : ""}</span>
       </span>
     );
   const conversar = (c) => {
@@ -1718,8 +1726,9 @@ function Contato({ c, ativo, lido, onClick, fixado = false }) {
           {fixado && <span aria-label="fixado" className="icone text-base text-muted">push_pin</span>}
           {!fixado && <Posicao codigo={c.posicao} className="w-9 shrink-0 py-0 text-xs" />}
           {novas > 0 && (
-            <span aria-label={`${novas} não lida${novas > 1 ? "s" : ""}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-full bg-destaque text-xs font-bold text-pitch-950">
+            <span className="ml-auto grid size-5 shrink-0 place-items-center rounded-full bg-destaque text-xs font-bold text-pitch-950">
               {novas}
+              <span className="sr-only"> não lida{novas > 1 ? "s" : ""}</span>
             </span>
           )}
         </span>
@@ -2329,7 +2338,21 @@ function Propostas({ id, lista, onConversar }) {
                 <Dinheiro valor={p.valor} className="font-kit text-lg text-chalk" />
                 <span className="text-sm">{p.situacao === "saiu" ? "· o jogador saiu do clube" : "· recusada ou expirou"}</span>
                 <span className="ml-auto text-sm">até {dataBR(p.ultima)}</span>
-                {p.fala && <p className="basis-full truncate pl-8 text-sm italic">“{p.fala}”</p>}
+                {p.fala &&
+                  (p.situacao === "saiu" ? (
+                    <p className="basis-full truncate pl-8 text-sm italic">“{p.fala}”</p>
+                  ) : (
+                    <button
+                      onClick={() => onConversar(String(p.player_id))}
+                      className="group flex min-w-0 basis-full items-baseline gap-2 pl-8 text-left text-sm"
+                    >
+                      <span className="min-w-0 truncate italic group-hover:text-chalk">“{p.fala}”</span>
+                      <span className="flex shrink-0 items-center gap-1 text-chalk group-hover:text-destaque">
+                        <span aria-hidden="true" className="icone text-base">reply</span>
+                        Falar com ele
+                      </span>
+                    </button>
+                  ))}
               </li>
             ))}
           </ul>
@@ -2379,7 +2402,7 @@ function FalaDoJogador({ id, p, onConversar }) {
             <span className="mt-0.5 block text-[0.95rem] leading-snug text-chalk">{p.fala}</span>
             <span className="mt-1.5 flex items-center justify-end gap-1 text-xs text-muted group-hover:text-destaque">
               <span aria-hidden="true" className="icone text-base">reply</span>
-              Responder
+              Falar com ele
             </span>
           </span>
         </button>
