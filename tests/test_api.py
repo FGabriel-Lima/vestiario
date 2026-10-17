@@ -8,7 +8,7 @@ from conftest import SAVES, atuacao, fazer_save, partida
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from vestiario import api, banco, ia, leitor
+from vestiario import api, banco, ia, leitor, sincronizar
 
 
 @pytest.fixture
@@ -311,6 +311,23 @@ def test_passagem_encerrada_nao_aceita_acoes(cliente, monkeypatch):
     assert cliente.get("/api/carreiras/1").json()["encerrada"]["motivo"] == "trocou de clube"
     assert len(cliente.get("/api/carreiras/2/passagens").json()["passagens"]) == 2
     for rota, corpo in [("/api/carreiras/1/conversas/auxiliar", {"texto": "oi"}), ("/api/carreiras/1/feed", None),
-                        ("/api/carreiras/1/diretoria/assinar", None), ("/api/carreiras/1/coletiva", None)]:
+                        ("/api/carreiras/1/diretoria/assinar", None), ("/api/carreiras/1/coletiva", None),
+                        ("/api/carreiras/1/propostas/parecer", {"player_id": 1, "clube_idx": 2, "valor": 3}),
+                        ("/api/carreiras/1/propostas/reacao", {"player_id": 1}),
+                        ("/api/carreiras/1/coletiva/respostas", {"respostas": ["oi"]})]:
         assert cliente.post(rota, json=corpo).status_code == 409, rota
     assert cliente.get("/api/carreiras/1/diretoria").status_code == 200  # ver continua valendo
+
+
+def test_save_antigo_do_clube_anterior_nao_mexe_na_passagem_encerrada(cliente, monkeypatch):
+    # São Paulo em 01/03, o clube novo em 10/01/2027 e, depois, um backup do clube anterior (01/02/2026)
+    saves = iter([fazer_save("2026-03-01"), fazer_save("2027-01-10", clube_idx=1), fazer_save("2026-02-01")])
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: next(saves))
+    atualizadas = []
+    monkeypatch.setattr(sincronizar.diretoria, "atualizar", lambda con, cid: atualizadas.append(cid))
+    (api.SAVES).mkdir()
+    for conteudo in (b"x", b"xy", b"xyz"):  # outro tamanho: o save é relido
+        (api.SAVES / "ML00000000").write_bytes(conteudo)
+        cliente.post("/api/sincronizar")
+    assert [c["id"] for c in cliente.get("/api/carreiras").json()] == [2]
+    assert atualizadas == [1, 2]  # o backup foi para a passagem 1, que não ganhou diretoria

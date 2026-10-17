@@ -2898,10 +2898,10 @@ function CartaDeProposta({ id, p, onConversar }) {
       )}
       <footer className="mt-4 flex items-center gap-2 border-t border-pitch-800 pt-3 text-sm text-muted">
         <span className="size-2 rounded-full bg-neon" aria-hidden="true" />
-        Aberta · no save desde {dataBR(p.primeira)}
+        {onConversar ? "Aberta" : "Em aberto quando você saiu"} · no save desde {dataBR(p.primeira)}
       </footer>
       <FalaDoJogador id={id} p={p} onConversar={onConversar} />
-      <ParecerDoAuxiliar id={id} p={p} />
+      {(onConversar || p.parecer) && <ParecerDoAuxiliar id={id} p={p} />}
     </article>
   );
 }

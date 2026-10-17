@@ -49,6 +49,7 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
             dados = {"clube_anterior": ant["clube_nome"], "motivo_saida": ant["motivo_saida"], "data": ate}
             post("clube", "novo_tecnico", ate, dados)
             post("geglobo", "novo_tecnico", ate, dict(dados))
+            de = ate  # jogos, títulos, propostas e negócios de antes da chegada foram de outro técnico
 
     # o dia da sincronização anterior entra de novo: o save pode ter sido gravado nesse dia antes do jogo (aconteceu);
     # jogo que já virou post não se repete

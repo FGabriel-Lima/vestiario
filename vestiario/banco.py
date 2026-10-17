@@ -348,20 +348,33 @@ def _aproveitamento(r: dict) -> int | None:
 
 def passagens(con: sqlite3.Connection, cid: int) -> dict:
     """A carreira do técnico na Master League: cada passagem com a campanha e os títulos do período dela, e o total.
-    O período vai de depois do fim da passagem anterior (a que acabou antes desta começar) até o fim desta; a
-    primeira não tem começo (entram os jogos de antes da primeira sincronização) e a atual não tem fim."""
-    # ponytail: na volta a um clube antigo, a passagem retomada conta também os jogos dele enquanto o técnico estava
-    # em outro clube (o período é um só); separar em trechos se isso aparecer
+    O técnico está num clube até o save mostrá-lo no seguinte: a passagem seguinte começa na primeira sincronização
+    dela (e depois do fim da anterior, se as duas caem no mesmo dia). A primeira não tem começo (entram os jogos de
+    antes da primeira sincronização) e a última não tem fim. Os jogos e títulos vêm de todas as passagens, porque os
+    do intervalo entre a última sincronização num clube e a primeira no seguinte só estão no save do clube novo."""
+    # ponytail: na volta a um clube antigo, a passagem retomada é uma só (a ordem é a da primeira sincronização) e
+    # fica com o período dela; separar em trechos se isso aparecer
     curtas = _passagens_curtas(con, cid)
+    jogos_de, titulos_de = {}, {}
+    for q in curtas:
+        for x in con.execute(_PARTIDA + "WHERE p.carreira_id = ? ORDER BY p.data", (q["id"],)):
+            if x["disputada"]:
+                for idx in (x["mandante_idx"], x["visitante_idx"]):
+                    jogos_de.setdefault(idx, {}).setdefault((x["data"], x["mandante_idx"], x["visitante_idx"]), dict(x))
+        for t in titulos(con, q["id"]):
+            titulos_de.setdefault(t["campeao"]["idx"], {}).setdefault((t["nome"], t["temporada"]), t)
+
+    def chegou(d, i):  # o jogo da data d já é da passagem i (e não da anterior)?
+        return i == 0 or (d >= curtas[i]["inicio"] and d > curtas[i - 1]["fim"])
+
     lista = []
-    for p in curtas:
-        antes = max((q["fim"] for q in curtas if q["fim"] < p["inicio"]), default=None)
-        ate = None if p["atual"] else p["fim"]
-        dentro = lambda d: (antes is None or d > antes) and (ate is None or d <= ate)
-        jogos = [x for x in partidas(con, p["id"]) if x["disputada"] and dentro(x["data"])]
+    for i, p in enumerate(curtas):
+        dentro = lambda d: chegou(d, i) and (i + 1 == len(curtas) or not chegou(d, i + 1))
+        jogos = sorted((x for x in jogos_de.get(p["clube_idx"], {}).values() if dentro(x["data"])), key=lambda x: x["data"])
         camp = _campanha(jogos, p["clube_idx"])
-        titulos_ = [{"nome": t["nome"], "temporada": t["temporada"]} for t in titulos(con, p["id"])
-                    if t["campeao"]["idx"] == p["clube_idx"] and dentro(t["fim"])]
+        titulos_ = [{"nome": t["nome"], "temporada": t["temporada"]}
+                    for t in sorted(titulos_de.get(p["clube_idx"], {}).values(), key=lambda t: t["fim"], reverse=True)
+                    if dentro(t["fim"])]
         lista.append({**p, **{k: camp[k] for k in ("jogos", "vitorias", "empates", "derrotas")},
                       "aproveitamento": _aproveitamento(camp), "titulos": titulos_})
     total = {k: sum(p[k] for p in lista) for k in ("jogos", "vitorias", "empates", "derrotas")}

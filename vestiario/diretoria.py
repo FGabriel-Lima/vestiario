@@ -145,6 +145,8 @@ def proposta(p: dict) -> list[dict]:
             if not c["eliminado"] and c["fase"] < meta:  # copa já decidida para o clube não vira meta
                 itens.append(_item("meta_copa", meta, copa=c["nome"], chave=c["chave"]))
     for janela, n in enumerate(v["contratacoes"], start=1):
+        if janela == 1 and p["data_jogo"] >= f"{p['ano']}-07-01":
+            continue  # acordo feito em julho ou depois: a janela de janeiro já fechou
         itens.append(_item("contratacoes", n, janela=janela))
     if p["orcamento"] is not None:
         itens.append(_item("teto_contratacao", v["teto_contratacao"], orcamento=p["orcamento"]))

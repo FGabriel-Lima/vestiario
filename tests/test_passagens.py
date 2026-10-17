@@ -82,15 +82,29 @@ def test_banco_sem_clube_na_carreira_ganha_a_coluna_e_mantem_os_ids(tmp_path):
 
 
 def test_campanha_de_cada_passagem_pelo_periodo(con):
-    # A (idx 0) até 2026-03-01: ganhou de B em 02/01 e perdeu para C em 20/02; depois treina B (idx 1) e ganha de C
+    # A (idx 0) sincronizado até 01/03: ganhou de B em 02/01 e perdeu para C em 20/02; o save seguinte já é de B (idx 1)
     jogos_a = [partida("2026-01-02", 0, 1, (2, 0), [atuacao(10, 0)]), partida("2026-02-20", 2, 0, (1, 0), [atuacao(10, 1)])]
     no_clube(con, "2026-03-01", 0, jogos_a)
-    jogos_b = jogos_a + [partida("2026-04-05", 1, 2, (3, 1), [atuacao(20, 0)])]
+    # entre as duas sincronizações: A empatou com C e B ganhou de C, ainda com o técnico em A; depois B ganha de C
+    jogos_b = jogos_a + [partida("2026-03-10", 0, 2, (1, 1), [atuacao(10, 0)]),
+                         partida("2026-04-05", 1, 2, (3, 1), [atuacao(20, 0)]),
+                         partida("2026-05-01", 1, 2, (2, 0), [atuacao(20, 0)])]
     no_clube(con, "2026-05-01", 1, jogos_b)
     r = banco.passagens(con, 2)
     a, b = r["passagens"]
-    assert (a["clube_nome"], a["jogos"], a["vitorias"], a["derrotas"], a["aproveitamento"]) == ("Clube A", 2, 1, 1, 50)
-    # o jogo de B em 02/01 (contra A) é de antes da passagem dele: não conta
+    # o empate do intervalo só está no save de B, mas é de A
+    assert (a["clube_nome"], a["jogos"], a["vitorias"], a["empates"], a["derrotas"]) == ("Clube A", 3, 1, 1, 1)
+    # os jogos de B antes da primeira sincronização nele (02/01 e 05/04) não contam
     assert (b["clube_nome"], b["jogos"], b["vitorias"], b["aproveitamento"]) == ("Clube B", 1, 1, 100)
-    assert r["total"] == {"clubes": 2, "jogos": 3, "vitorias": 2, "empates": 0, "derrotas": 1, "aproveitamento": 67,
+    assert r["total"] == {"clubes": 2, "jogos": 4, "vitorias": 2, "empates": 1, "derrotas": 1, "aproveitamento": 58,
                           "titulos": 0}
+
+
+def test_troca_no_mesmo_dia(con):
+    # A joga e é sincronizado em 01/03; no mesmo dia o save já mostra o técnico em B, que joga em 20/03
+    jogo_a = partida("2026-03-01", 0, 2, (1, 0), [atuacao(10, 0)])
+    no_clube(con, "2026-03-01", 0, [jogo_a])
+    no_clube(con, "2026-03-01", 1, [jogo_a])
+    no_clube(con, "2026-04-01", 1, [jogo_a, partida("2026-03-20", 1, 2, (0, 1), [atuacao(20, 0)])])
+    a, b = banco.passagens(con, 2)["passagens"]
+    assert (a["jogos"], a["vitorias"], b["jogos"], b["derrotas"]) == (1, 1, 1, 1)

@@ -124,8 +124,11 @@ def test_posts_da_diretoria(con):
 def test_novo_tecnico_na_primeira_edicao_da_passagem():
     c = banco.conectar(":memory:")
     banco.gravar(c, "ML00000000", fazer_save("2026-03-01"), AGORA)
-    banco.gravar(c, "ML00000000", fazer_save("2027-01-10", clube_idx=1), AGORA)
+    # o clube novo jogou em 05/01, antes de o save mostrar o técnico nele: não é jogo dele
+    banco.gravar(c, "ML00000000", fazer_save("2027-01-10", [partida("2027-01-05", 1, 2, (2, 0), [atuacao(20, 0)])],
+                                             clube_idx=1), AGORA)
     posts = feed.posts_do_periodo(c, 2)
+    assert not [p for p in posts if p["tipo"] in ("fim_de_jogo", "goleada", "classificacao")]
     novos = [(p["perfil"], p["dados"]) for p in posts if p["tipo"] == "novo_tecnico"]
     assert novos == [("clube", {"clube_anterior": "Clube A", "motivo_saida": "trocou de clube", "data": "2027-01-10"}),
                      ("geglobo", {"clube_anterior": "Clube A", "motivo_saida": "trocou de clube", "data": "2027-01-10"})]

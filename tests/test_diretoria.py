@@ -97,6 +97,11 @@ def test_proposta_de_clube_medio():
         ("vender_para_comprar", None): 50, ("livres", None): 1, ("emprestimos", None): 2}
 
 
+def test_acordo_de_julho_nao_tem_a_janela_de_janeiro():
+    v = valores(diretoria.proposta({**PERFIL, "data_jogo": "2026-07-01"}))
+    assert ("contratacoes", 1) not in v and v[("contratacoes", 2)] == 2
+
+
 def test_crise_sobrescreve_o_porte():
     v = valores(diretoria.proposta({**PERFIL, "crise": True}))
     assert (v[("meta_liga", None)], v[("contratacoes", 1)], v[("contratacoes", 2)], v[("vender_para_comprar", None)],
