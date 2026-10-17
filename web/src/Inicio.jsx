@@ -89,7 +89,7 @@ export default function Inicio({ onAbrir }) {
                   Também treinou:
                   {c.outras_passagens.map((p) => (
                     <button key={p.id} onClick={() => onAbrir(p.id)} className="text-chalk underline-offset-2 hover:text-destaque hover:underline">
-                      {p.clube_nome} ({p.inicio.slice(0, 4)}–{p.fim.slice(0, 4)})
+                      {p.clube_nome} ({p.inicio.slice(0, 4)}{p.fim && p.fim.slice(0, 4) !== p.inicio.slice(0, 4) ? `–${p.fim.slice(0, 4)}` : ""})
                     </button>
                   ))}
                 </p>

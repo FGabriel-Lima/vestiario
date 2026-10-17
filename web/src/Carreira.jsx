@@ -71,10 +71,10 @@ function estiloDoClube(cores = []) {
   };
 }
 
-export default function Carreira({ id, onVoltar, onTrocar }) {
+export default function Carreira({ id, abaInicial, onVoltar, onTrocar }) {
   const [carreira, setCarreira] = useState(null);
   const [ano, setAno] = useState(null);
-  const [aba, setAba] = useState(ABAS[0]);
+  const [aba, setAba] = useState(abaInicial ?? ABAS[0]);
   const [contato, setContato] = useState(null);
   const [ficha, setFicha] = useState(null);
   const [contatos, setContatos] = useState([]);
@@ -98,11 +98,13 @@ export default function Carreira({ id, onVoltar, onTrocar }) {
         <span className="sr-only"> não lida{naoLidas > 1 ? "s" : ""}</span>
       </span>
     );
-  const conversar = (c) => {
+  const conversar0 = (c) => {
     setFicha(null);
     setContato(c);
     setAba("Conversas");
   };
+  // passagem encerrada: sem conversa nova, então os botões que a abririam somem (onConversar nulo)
+  const conversar = carreira?.encerrada ? null : conversar0;
   const [erro, setErro] = useState(null);
 
   useEffect(() => {
@@ -164,7 +166,7 @@ export default function Carreira({ id, onVoltar, onTrocar }) {
                 <span className="sr-only">Passagem</span>
                 <select
                   value={id}
-                  onChange={(e) => onTrocar(Number(e.target.value))}
+                  onChange={(e) => onTrocar(Number(e.target.value), aba)}
                   className="w-full rounded-md border border-pitch-700 bg-pitch-800 px-2 py-1 font-kit text-sm uppercase"
                 >
                   {carreira.passagens.map((p) => (
@@ -251,7 +253,7 @@ export default function Carreira({ id, onVoltar, onTrocar }) {
             <>
               {aba === "Visão geral" && (
                 <>
-                  <Atencao id={id} onFicha={setFicha} onConversar={conversar} onAba={setAba} />
+                  {!carreira.encerrada && <Atencao id={id} onFicha={setFicha} onConversar={conversar} onAba={setAba} />}
                   <VisaoGeral id={id} ano={ano} clube={carreira.clube_idx} carreira={carreira} dataJogo={carreira.data_jogo} />
                 </>
               )}
@@ -265,7 +267,7 @@ export default function Carreira({ id, onVoltar, onTrocar }) {
               {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
               {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
               {aba === "Pelo mundo" && <PeloMundo id={id} ano={ano} clube={carreira.clube_idx} />}
-              {aba === "Carreira do técnico" && <CarreiraDoTecnico id={id} onTrocar={onTrocar} />}
+              {aba === "Carreira do técnico" && <CarreiraDoTecnico id={id} onTrocar={(novo) => onTrocar(novo, aba)} />}
             </>
           )}
         </div>
@@ -576,7 +578,7 @@ function Elenco({ id, ano, dataJogo, onConversar, onFicha }) {
                         {l.nome}
                       </button>
                       {!l.no_elenco && <span className="font-kit text-sm uppercase tracking-wide">saiu</span>}
-                      {l.no_elenco && (
+                      {l.no_elenco && onConversar && (
                         <button
                           onClick={() => onConversar(String(l.player_id))}
                           aria-label={`Chamar ${l.nome} pra conversa`}
@@ -1308,7 +1310,7 @@ function Feed({ id, encerrada }) {
       )}
       {f.coletiva && !encerrada && <Coletiva key={f.coletiva.jogo.data} id={id} coletiva={f.coletiva} onDada={() => setVersao((v) => v + 1)} />}
       {f.posts.length === 0 ? (
-        <p className="text-muted">Nenhum post ainda. Carregue os posts do save mais recente.</p>
+        <p className="text-muted">{encerrada ? "Nenhum post nesta passagem." : "Nenhum post ainda. Carregue os posts do save mais recente."}</p>
       ) : (
         <ol className="space-y-10">
           {f.posts.map((p) => (
@@ -1939,47 +1941,47 @@ function Conversa({ id, contato, onVoltar, onMudou, onFicha, encerrada }) {
           Você não treina mais este clube. A conversa fica guardada como estava.
         </p>
       ) : (
-      <div className="border-t border-pitch-800 bg-pitch-900 px-3 pb-3 pt-2">
-        {c.atalhos.length > 0 && (
-          <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-            {c.atalhos.map((a) => (
-              <button
-                key={a}
-                onClick={() => enviar(a)}
-                disabled={digitando}
-                className="shrink-0 rounded-full border border-pitch-700 px-3 py-1 text-sm hover:border-destaque hover:text-destaque disabled:opacity-50"
-              >
-                {a}
-              </button>
-            ))}
-          </div>
-        )}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            enviar(texto);
-          }}
-          className="flex gap-2"
-        >
-          <label className="sr-only" htmlFor="mensagem">Mensagem para {nome}</label>
-          <input
-            id="mensagem"
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            placeholder="Escreva uma mensagem"
-            autoComplete="off"
-            className="min-w-0 flex-1 rounded-full border border-pitch-700 bg-pitch-950 px-4 py-2 placeholder:text-muted"
-          />
-          <button
-            type="submit"
-            disabled={digitando || !texto.trim()}
-            aria-label="Enviar"
-            className="grid size-10 shrink-0 place-items-center rounded-full bg-destaque text-pitch-950 disabled:opacity-40"
+        <div className="border-t border-pitch-800 bg-pitch-900 px-3 pb-3 pt-2">
+          {c.atalhos.length > 0 && (
+            <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+              {c.atalhos.map((a) => (
+                <button
+                  key={a}
+                  onClick={() => enviar(a)}
+                  disabled={digitando}
+                  className="shrink-0 rounded-full border border-pitch-700 px-3 py-1 text-sm hover:border-destaque hover:text-destaque disabled:opacity-50"
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          )}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              enviar(texto);
+            }}
+            className="flex gap-2"
           >
-            <span aria-hidden="true" className="icone">send</span>
-          </button>
-        </form>
-      </div>
+            <label className="sr-only" htmlFor="mensagem">Mensagem para {nome}</label>
+            <input
+              id="mensagem"
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              placeholder="Escreva uma mensagem"
+              autoComplete="off"
+              className="min-w-0 flex-1 rounded-full border border-pitch-700 bg-pitch-950 px-4 py-2 placeholder:text-muted"
+            />
+            <button
+              type="submit"
+              disabled={digitando || !texto.trim()}
+              aria-label="Enviar"
+              className="grid size-10 shrink-0 place-items-center rounded-full bg-destaque text-pitch-950 disabled:opacity-40"
+            >
+              <span aria-hidden="true" className="icone">send</span>
+            </button>
+          </form>
+        </div>
       )}
     </section>
   );
@@ -2118,7 +2120,7 @@ function Ficha({ id, pid, clube, onFechar, onConversar }) {
                     ))}
                   </ul>
                 )}
-                {f.no_elenco && (
+                {f.no_elenco && onConversar && (
                   <button
                     onClick={() => onConversar(String(f.player_id))}
                     className="flex items-center gap-1.5 rounded-full bg-destaque px-3 py-1 text-sm font-semibold text-pitch-950 hover:brightness-110"
@@ -2758,7 +2760,7 @@ function Propostas({ id, lista, onConversar }) {
                 <span className="text-sm">{p.situacao === "saiu" ? "· o jogador saiu do clube" : "· recusada ou expirou"}</span>
                 <span className="ml-auto text-sm">até {dataBR(p.ultima)}</span>
                 {p.fala &&
-                  (p.situacao === "saiu" ? (
+                  (p.situacao === "saiu" || !onConversar ? (
                     <p title={p.fala} className="line-clamp-3 basis-full pl-8 text-sm italic">“{p.fala}”</p>
                   ) : (
                     <button
@@ -2800,6 +2802,7 @@ function FalaDoJogador({ id, p, onConversar }) {
   const [ouvindo, setOuvindo] = useState(false);
   const [erro, setErro] = useState(null);
   const abrir = () => onConversar(String(p.player_id));
+  if (!onConversar) return null;
   const ouvir = () => {
     setOuvindo(true);
     setErro(null);
