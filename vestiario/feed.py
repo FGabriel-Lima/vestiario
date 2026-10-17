@@ -41,6 +41,15 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
     posts = []
     post = lambda perfil, tipo, data, dados: posts.append({"perfil": perfil, "tipo": tipo, "data": data, "dados": dados})
 
+    # primeira edição de uma passagem que veio depois de outra: o clube anuncia o técnico e o ge dá a notícia
+    if de is None:
+        anteriores = [p for p in banco._passagens_curtas(con, cid) if p["id"] != cid and p["fim"] <= ate]
+        if anteriores:
+            ant = max(anteriores, key=lambda p: p["fim"])
+            dados = {"clube_anterior": ant["clube_nome"], "motivo_saida": ant["motivo_saida"], "data": ate}
+            post("clube", "novo_tecnico", ate, dados)
+            post("geglobo", "novo_tecnico", ate, dict(dados))
+
     # o dia da sincronização anterior entra de novo: o save pode ter sido gravado nesse dia antes do jogo (aconteceu);
     # jogo que já virou post não se repete
     ja_postados = {(d["data"], d["mandante"]["idx"], d["visitante"]["idx"]) for d in (
@@ -162,6 +171,8 @@ Cada post já tem o perfil que publica, o tipo e os fatos. Escreva uma legenda p
 - Posts da diretoria ("acordo", "diretoria_insatisfeita", "ultimato", "demissao", "balanco"): a relação do técnico
   com a diretoria, só com o "motivo" e as "exigencias" dos fatos. O perfil oficial anuncia o acordo da temporada e a
   saída do técnico com sobriedade; o ge noticia a insatisfação, o ultimato, a demissão e o balanço.
+- Posts "novo_tecnico": a chegada do técnico ao clube. O perfil oficial dá as boas-vindas; o ge noticia citando o
+  "clube_anterior" e o "motivo_saida" ("demitido" ou "trocou de clube") dos fatos.
 
 Regras, sem exceção:
 - Use SOMENTE os fatos de cada post. Não cite pessoas, clubes, números, lesões, declarações, bastidores, intenções
@@ -201,6 +212,8 @@ def legenda_padrao(post: dict) -> str:
         return f"INFORMAÇÃO: {d['clube']['nome']} fez proposta por {d['nome']}."
     if t == "contratos":
         return "Contratos que vencem nos próximos meses: " + ", ".join(j["nome"] for j in d["jogadores"]) + "."
+    if t == "novo_tecnico":
+        return f"Novo técnico no comando, vindo do {d['clube_anterior']}."
     if t == "acordo":
         return f"Diretoria e comissão técnica alinhadas para {d['ano']}."
     if t in ("diretoria_insatisfeita", "ultimato", "demissao", "balanco"):

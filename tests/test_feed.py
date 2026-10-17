@@ -119,3 +119,18 @@ def test_posts_da_diretoria(con):
     acordo = next(p for p in posts if p["tipo"] == "acordo")
     assert acordo["dados"] == {"ano": 2026, "imposto": False, "exigencias": ["até 1 agente livre no ano"]}
     assert feed.legenda_padrao(next(p for p in posts if p["tipo"] == "demissao")) == "Demitido: ultimato não cumprido."
+
+
+def test_novo_tecnico_na_primeira_edicao_da_passagem():
+    c = banco.conectar(":memory:")
+    banco.gravar(c, "ML00000000", fazer_save("2026-03-01"), AGORA)
+    banco.gravar(c, "ML00000000", fazer_save("2027-01-10", clube_idx=1), AGORA)
+    posts = feed.posts_do_periodo(c, 2)
+    novos = [(p["perfil"], p["dados"]) for p in posts if p["tipo"] == "novo_tecnico"]
+    assert novos == [("clube", {"clube_anterior": "Clube A", "motivo_saida": "trocou de clube", "data": "2027-01-10"}),
+                     ("geglobo", {"clube_anterior": "Clube A", "motivo_saida": "trocou de clube", "data": "2027-01-10"})]
+    assert not [p for p in feed.posts_do_periodo(c, 1) if p["tipo"] == "novo_tecnico"]  # a primeira passagem não tem
+    banco.gravar(c, "ML00000000", fazer_save("2027-02-10", clube_idx=1), AGORA)
+    assert not [p for p in feed.posts_do_periodo(c, 2) if p["tipo"] == "novo_tecnico"]  # só na primeira edição
+    assert feed.legenda_padrao(posts[[p["tipo"] for p in posts].index("novo_tecnico")]) == (
+        "Novo técnico no comando, vindo do Clube A.")
