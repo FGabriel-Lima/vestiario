@@ -122,6 +122,7 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
         # então a tabela é refeita com os mesmos ids (as outras tabelas continuam apontando para eles)
         con.execute("PRAGMA foreign_keys = OFF")
         with con:
+            con.execute("DROP TABLE IF EXISTS carreira_nova")  # sobra de uma migração interrompida
             con.execute("CREATE TABLE carreira_nova(id INTEGER PRIMARY KEY, slot TEXT NOT NULL, nome TEXT NOT NULL, "
                         "clube_idx INTEGER NOT NULL, UNIQUE(slot, nome, clube_idx))")
             con.execute("INSERT INTO carreira_nova SELECT c.id, c.slot, c.nome, coalesce((SELECT s.clube_idx FROM "
@@ -339,6 +340,33 @@ def _passagens_curtas(con: sqlite3.Connection, cid: int) -> list[dict]:
                       "inicio": r["inicio"], "fim": r["fim"], "atual": r["id"] == atual,
                       "motivo_saida": None if r["id"] == atual else "demitido" if demitido else "trocou de clube"})
     return lista
+
+
+def _aproveitamento(r: dict) -> int | None:
+    return round((3 * r["vitorias"] + r["empates"]) / (3 * r["jogos"]) * 100) if r["jogos"] else None
+
+
+def passagens(con: sqlite3.Connection, cid: int) -> dict:
+    """A carreira do técnico na Master League: cada passagem com a campanha e os títulos do período dela, e o total.
+    O período vai de depois do fim da passagem anterior (a que acabou antes desta começar) até o fim desta; a
+    primeira não tem começo (entram os jogos de antes da primeira sincronização) e a atual não tem fim."""
+    # ponytail: na volta a um clube antigo, a passagem retomada conta também os jogos dele enquanto o técnico estava
+    # em outro clube (o período é um só); separar em trechos se isso aparecer
+    curtas = _passagens_curtas(con, cid)
+    lista = []
+    for p in curtas:
+        antes = max((q["fim"] for q in curtas if q["fim"] < p["inicio"]), default=None)
+        ate = None if p["atual"] else p["fim"]
+        dentro = lambda d: (antes is None or d > antes) and (ate is None or d <= ate)
+        jogos = [x for x in partidas(con, p["id"]) if x["disputada"] and dentro(x["data"])]
+        camp = _campanha(jogos, p["clube_idx"])
+        titulos_ = [{"nome": t["nome"], "temporada": t["temporada"]} for t in titulos(con, p["id"])
+                    if t["campeao"]["idx"] == p["clube_idx"] and dentro(t["fim"])]
+        lista.append({**p, **{k: camp[k] for k in ("jogos", "vitorias", "empates", "derrotas")},
+                      "aproveitamento": _aproveitamento(camp), "titulos": titulos_})
+    total = {k: sum(p[k] for p in lista) for k in ("jogos", "vitorias", "empates", "derrotas")}
+    return {"passagens": lista, "total": {"clubes": len(lista), **total, "aproveitamento": _aproveitamento(total),
+                                          "titulos": sum(len(p["titulos"]) for p in lista)}}
 
 
 def carreiras(con: sqlite3.Connection) -> list[dict]:

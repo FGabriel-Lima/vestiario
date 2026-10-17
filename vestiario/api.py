@@ -74,6 +74,14 @@ def _carreira(con, cid: int) -> dict:
     return c
 
 
+def _aberta(con, cid: int) -> dict:
+    """A carreira, se é a passagem atual; numa passagem encerrada (o técnico foi para outro clube), as ações recusam."""
+    c = _carreira(con, cid)
+    if c["encerrada"]:
+        raise HTTPException(409, "Você não treina mais este clube: esta passagem está encerrada.")
+    return c
+
+
 @app.post("/api/sincronizar")
 def post_sincronizar():
     with _con() as con:
@@ -191,10 +199,18 @@ class PedidoDeParecer(BaseModel):
     valor: int  # unidades do save (valor_bruto da proposta)
 
 
+@app.get("/api/carreiras/{cid}/passagens")
+def get_passagens(cid: int):
+    """Os clubes que o técnico treinou nesta Master League, com campanha e títulos de cada passagem e o total."""
+    with _con() as con:
+        _carreira(con, cid)
+        return banco.passagens(con, cid)
+
+
 @app.post("/api/carreiras/{cid}/propostas/parecer")
 def post_parecer(cid: int, pedido: PedidoDeParecer):
     with _con() as con:
-        _carreira(con, cid)
+        _aberta(con, cid)
         try:
             p = auxiliar.parecer_da_proposta(con, cid, pedido.player_id, pedido.clube_idx, pedido.valor)
         except ia.IAIndisponivel as e:
@@ -212,7 +228,7 @@ class PedidoDeReacao(BaseModel):
 def post_reacao(cid: int, pedido: PedidoDeReacao):
     """O jogador fala agora das propostas por ele (quando a sincronização não conseguiu falar com a IA)."""
     with _con() as con:
-        _carreira(con, cid)
+        _aberta(con, cid)
         try:
             return {"enviadas": conversas.reagir_propostas(con, cid, pedido.player_id)}
         except ia.IAIndisponivel as e:
@@ -230,7 +246,7 @@ def get_feed(cid: int):
 @app.post("/api/carreiras/{cid}/feed")
 def post_feed(cid: int):
     with _con() as con:
-        _carreira(con, cid)
+        _aberta(con, cid)
         try:
             return feed.atualizar(con, cid)
         except ia.IAIndisponivel as e:
@@ -259,7 +275,7 @@ def get_atencao(cid: int):
 def post_coletiva(cid: int):
     """Abre a coletiva do jogo mais recente: o repórter faz as perguntas."""
     with _con() as con:
-        _carreira(con, cid)
+        _aberta(con, cid)
         try:
             return feed.abrir_coletiva(con, cid)
         except LookupError as e:
@@ -273,7 +289,7 @@ class Respostas(BaseModel):
 @app.post("/api/carreiras/{cid}/coletiva/respostas")
 def post_respostas(cid: int, r: Respostas):
     with _con() as con:
-        _carreira(con, cid)
+        _aberta(con, cid)
         try:
             return feed.responder_coletiva(con, cid, r.respostas)
         except LookupError as e:
@@ -305,7 +321,7 @@ class Mensagem(BaseModel):
 @app.post("/api/carreiras/{cid}/conversas/{contato}")
 def post_conversa(cid: int, contato: str, m: Mensagem):
     with _con() as con:
-        _carreira(con, cid)
+        _aberta(con, cid)
         try:
             c = conversas.responder(con, cid, contato, m.texto)
         except ValueError as e:
@@ -327,7 +343,7 @@ class Escolha(BaseModel):
 
 def _na_diretoria(con, cid: int, acao) -> dict:
     """Roda uma ação da diretoria e devolve a aba atualizada; os erros viram respostas HTTP."""
-    _carreira(con, cid)
+    _aberta(con, cid)
     try:
         acao()
     except ValueError as e:

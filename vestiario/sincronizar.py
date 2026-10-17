@@ -80,6 +80,8 @@ def sincronizar(con: sqlite3.Connection, pasta_saves: Path, pasta_pes: Path, pas
     # a cada carreira que mudou: os jogadores falam das propostas por eles e o feed sai (chamadas à IA)
     for cid in dict.fromkeys(r["carreira_id"] for r in resultados if r.get("status") == "ok"):
         nome = next(r["carreira"] for r in resultados if r.get("carreira_id") == cid)
+        if banco.carreira(con, cid)["encerrada"]:
+            continue  # um save antigo (backup) do clube anterior: a passagem encerrada não ganha diretoria nem feed
         try:
             diretoria.atualizar(con, cid)
         except Exception as e:  # fronteira: um erro da diretoria nunca derruba a sincronização

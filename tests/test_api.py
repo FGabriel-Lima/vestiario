@@ -297,3 +297,20 @@ def test_diretoria(cliente, monkeypatch):
     assert cliente.post("/api/carreiras/1/diretoria/assinar").json()["acordo"]["estado"] == "assinado"
     assert cliente.post("/api/carreiras/1/diretoria/assinar").status_code == 409
     assert cliente.post("/api/carreiras/1/diretoria/revisao", json={"escolha": None}).status_code == 409
+
+
+def test_passagem_encerrada_nao_aceita_acoes(cliente, monkeypatch):
+    saves = iter([fazer_save("2026-03-01"), fazer_save("2027-01-10", clube_idx=1)])
+    monkeypatch.setattr(leitor, "ler_save", lambda raw: next(saves))
+    (api.SAVES).mkdir()
+    (api.SAVES / "ML00000000").write_bytes(b"x")
+    cliente.post("/api/sincronizar")
+    (api.SAVES / "ML00000000").write_bytes(b"xy")  # outro tamanho: o save é relido
+    cliente.post("/api/sincronizar")
+    assert [c["id"] for c in cliente.get("/api/carreiras").json()] == [2]
+    assert cliente.get("/api/carreiras/1").json()["encerrada"]["motivo"] == "trocou de clube"
+    assert len(cliente.get("/api/carreiras/2/passagens").json()["passagens"]) == 2
+    for rota, corpo in [("/api/carreiras/1/conversas/auxiliar", {"texto": "oi"}), ("/api/carreiras/1/feed", None),
+                        ("/api/carreiras/1/diretoria/assinar", None), ("/api/carreiras/1/coletiva", None)]:
+        assert cliente.post(rota, json=corpo).status_code == 409, rota
+    assert cliente.get("/api/carreiras/1/diretoria").status_code == 200  # ver continua valendo
