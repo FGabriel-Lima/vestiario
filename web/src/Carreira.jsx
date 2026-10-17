@@ -8,7 +8,7 @@ const GRUPOS = [
   { nome: "Clube", icone: "shield", abas: ["Visão geral", "Elenco", "Transferências", "Diretoria"] },
   { nome: "Jogos", icone: "sports_soccer", abas: ["Partidas", "Campeonatos", "Adversários"] },
   { nome: "Bastidores", icone: "forum", abas: ["Feed", "Conversas"] },
-  { nome: "História", icone: "emoji_events", abas: ["Lendas", "Pelo mundo"] },
+  { nome: "História", icone: "emoji_events", abas: ["Lendas", "Pelo mundo", "Carreira do técnico"] },
 ];
 const ABAS = GRUPOS.flatMap((g) => g.abas);
 const SOBRE = {
@@ -23,12 +23,13 @@ const SOBRE = {
   Lendas: "Títulos, recordes e os maiores do clube.",
   Diretoria: "O acordo da temporada, a confiança da diretoria e as reuniões.",
   "Pelo mundo": "Artilheiros, garçons e campeões do resto do mundo.",
+  "Carreira do técnico": "Os clubes que você treinou nesta Master League, com a campanha de cada um.",
 };
 // Abas que olham a carreira inteira e não usam o seletor de temporada
 // (Campeonatos tem o próprio seletor de edição, porque temporada de liga europeia atravessa o ano)
-const DA_CARREIRA = new Set(["Feed", "Conversas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Diretoria"]);
+const DA_CARREIRA = new Set(["Feed", "Conversas", "Campeonatos", "Transferências", "Adversários", "Lendas", "Diretoria", "Carreira do técnico"]);
 // no celular, 4 abas dividem a largura: rótulos curtos
-const CURTO = { "Visão geral": "Geral", Transferências: "Mercado" };
+const CURTO = { "Visão geral": "Geral", Transferências: "Mercado", "Carreira do técnico": "Técnico" };
 
 const GRAMADO = "#0b1a10"; // --color-pitch-950
 const canais = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -70,7 +71,7 @@ function estiloDoClube(cores = []) {
   };
 }
 
-export default function Carreira({ id, onVoltar }) {
+export default function Carreira({ id, onVoltar, onTrocar }) {
   const [carreira, setCarreira] = useState(null);
   const [ano, setAno] = useState(null);
   const [aba, setAba] = useState(ABAS[0]);
@@ -158,6 +159,23 @@ export default function Carreira({ id, onVoltar }) {
           <div className="min-w-0">
             <p className="font-kit text-3xl font-extrabold uppercase leading-none tracking-tight lg:text-4xl">{carreira.clube_nome}</p>
             <p className="mt-1 font-kit text-sm uppercase tracking-[0.15em] text-muted">No jogo: {dataBR(carreira.data_jogo)}</p>
+            {carreira.passagens.length > 1 && (
+              <label className="mt-3 block">
+                <span className="sr-only">Passagem</span>
+                <select
+                  value={id}
+                  onChange={(e) => onTrocar(Number(e.target.value))}
+                  className="w-full rounded-md border border-pitch-700 bg-pitch-800 px-2 py-1 font-kit text-sm uppercase"
+                >
+                  {carreira.passagens.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.clube_nome}
+                      {p.atual ? " (atual)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         </div>
         <nav aria-label="Seções da carreira" className="mt-8 hidden space-y-6 lg:block">
@@ -198,6 +216,13 @@ export default function Carreira({ id, onVoltar }) {
             </button>
           ))}
         </nav>
+        {carreira.encerrada && (
+          <p role="status" className="mt-6 flex items-center gap-2 rounded-md border-l-4 border-gold bg-pitch-900 px-4 py-3 text-sm">
+            <span aria-hidden="true" className="icone text-gold">history</span>
+            Passagem encerrada em {dataBR(carreira.encerrada.data)}: {carreira.encerrada.motivo}. Aqui fica a história do
+            clube; as ações valem só na passagem atual.
+          </p>
+        )}
         <header className="mb-8 mt-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 border-b border-pitch-800 pb-5 lg:mt-12">
           <div>
             <h1 className="font-kit text-4xl font-extrabold uppercase leading-none sm:text-5xl">{aba}</h1>
@@ -232,14 +257,15 @@ export default function Carreira({ id, onVoltar }) {
               )}
               {aba === "Elenco" && <Elenco id={id} ano={ano} dataJogo={carreira.data_jogo} onConversar={conversar} onFicha={setFicha} />}
               {aba === "Partidas" && <Partidas id={id} ano={ano} clube={carreira.clube_idx} />}
-              {aba === "Feed" && <Feed id={id} />}
-              {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} onFicha={setFicha} />}
+              {aba === "Feed" && <Feed id={id} encerrada={!!carreira.encerrada} />}
+              {aba === "Conversas" && <Conversas id={id} contato={contato} onContato={setContato} onFicha={setFicha} encerrada={!!carreira.encerrada} />}
               {aba === "Campeonatos" && <Campeonatos id={id} clube={carreira.clube_idx} dataJogo={carreira.data_jogo} />}
               {aba === "Transferências" && <Transferencias id={id} onConversar={conversar} />}
-              {aba === "Diretoria" && <Diretoria id={id} />}
+              {aba === "Diretoria" && <Diretoria id={id} encerrada={!!carreira.encerrada} />}
               {aba === "Adversários" && <Adversarios id={id} clube={carreira.clube_idx} />}
               {aba === "Lendas" && <Lendas id={id} clube={carreira.clube_idx} />}
               {aba === "Pelo mundo" && <PeloMundo id={id} ano={ano} clube={carreira.clube_idx} />}
+              {aba === "Carreira do técnico" && <CarreiraDoTecnico id={id} onTrocar={onTrocar} />}
             </>
           )}
         </div>
@@ -1243,7 +1269,7 @@ const AVATAR = {
   mercadodabola: ["MB", "bg-pitch-950 text-gold ring-1 ring-gold"],
 };
 
-function Feed({ id }) {
+function Feed({ id, encerrada }) {
   const [versao, setVersao] = useState(0);
   const { dados: f, erro } = useDados(() => api.feed(id), [id, versao]);
   const [publicando, setPublicando] = useState(false);
@@ -1261,7 +1287,7 @@ function Feed({ id }) {
   };
   return (
     <div className="mx-auto max-w-lg">
-      {!f.publicado && (
+      {!f.publicado && !encerrada && (
         <div aria-live="polite" className="mb-8 rounded-md border border-dashed border-pitch-700 p-4">
           {publicando ? (
             <p className="flex items-center gap-2 text-muted">
@@ -1280,7 +1306,7 @@ function Feed({ id }) {
           {falha && <p className="mt-2 text-sm text-cartao">{falha}</p>}
         </div>
       )}
-      {f.coletiva && <Coletiva key={f.coletiva.jogo.data} id={id} coletiva={f.coletiva} onDada={() => setVersao((v) => v + 1)} />}
+      {f.coletiva && !encerrada && <Coletiva key={f.coletiva.jogo.data} id={id} coletiva={f.coletiva} onDada={() => setVersao((v) => v + 1)} />}
       {f.posts.length === 0 ? (
         <p className="text-muted">Nenhum post ainda. Carregue os posts do save mais recente.</p>
       ) : (
@@ -1609,6 +1635,17 @@ function ArteDoPost({ post }) {
         </div>
       );
     }
+    case "novo_tecnico":
+      return (
+        <div className={base}>
+          {selo(post.perfil === "geglobo" ? "Troca no comando" : "Bem-vindo, professor", post.perfil === "geglobo" ? "text-[#06aa48]" : "text-destaque")}
+          <span aria-hidden="true" className="icone mx-auto text-gold" style={{ fontSize: "7rem" }}>sports</span>
+          <p className="font-kit text-2xl font-extrabold uppercase leading-tight">
+            Vindo do {d.clube_anterior}
+            <span className="block text-base font-semibold opacity-70">{d.motivo_saida === "demitido" ? "depois da demissão" : "depois de trocar de clube"}</span>
+          </p>
+        </div>
+      );
     case "proposta":
       return (
         <div className={base}>
@@ -1681,7 +1718,7 @@ const corDoSinal = (s) => SINAL_COR[s] ?? (s.startsWith("proposta") ? "bg-[#4aa3
 // os sinais que puxam assunto vêm primeiro na agenda
 const PESO = (s) => (s.startsWith("proposta") ? 0 : s === "contrato vencendo" ? 1 : s === "joga pouco" ? 2 : s === "fase ruim" ? 3 : 5);
 
-function Conversas({ id, contato, onContato, onFicha }) {
+function Conversas({ id, contato, onContato, onFicha, encerrada }) {
   const [versao, setVersao] = useState(0);
   const { dados: lista, erro } = useDados(() => api.contatos(id), [id, versao]);
   // quem já foi aberto aqui está lido, mesmo com a lista vinda antes (no celular ela volta ao sair da conversa)
@@ -1719,7 +1756,7 @@ function Conversas({ id, contato, onContato, onFicha }) {
       </nav>
       <div className={`min-h-[36rem] bg-pitch-950 ${contato ? "" : "hidden lg:grid lg:place-items-center"}`}>
         {contato ? (
-          <Conversa key={contato} id={id} contato={contato} onVoltar={() => onContato(null)} onMudou={() => setVersao((v) => v + 1)}
+          <Conversa key={contato} encerrada={encerrada} id={id} contato={contato} onVoltar={() => onContato(null)} onMudou={() => setVersao((v) => v + 1)}
             onFicha={onFicha} />
         ) : (
           <p className="max-w-xs text-center text-muted">
@@ -1778,7 +1815,7 @@ function Contato({ c, ativo, lido, onClick, fixado = false }) {
   );
 }
 
-function Conversa({ id, contato, onVoltar, onMudou, onFicha }) {
+function Conversa({ id, contato, onVoltar, onMudou, onFicha, encerrada }) {
   const { dados: c, erro } = useDados(() => api.conversa(id, contato), [id, contato]);
   const [mensagens, setMensagens] = useState(null);
   const [texto, setTexto] = useState("");
@@ -1897,6 +1934,11 @@ function Conversa({ id, contato, onVoltar, onMudou, onFicha }) {
       </ol>
 
       {falha && <p className="px-4 pb-2 text-sm text-cartao">{falha}</p>}
+      {encerrada ? (
+        <p className="border-t border-pitch-800 bg-pitch-900 px-4 py-3 text-sm text-muted">
+          Você não treina mais este clube. A conversa fica guardada como estava.
+        </p>
+      ) : (
       <div className="border-t border-pitch-800 bg-pitch-900 px-3 pb-3 pt-2">
         {c.atalhos.length > 0 && (
           <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
@@ -1938,6 +1980,7 @@ function Conversa({ id, contato, onVoltar, onMudou, onFicha }) {
           </button>
         </form>
       </div>
+      )}
     </section>
   );
 }
@@ -2270,7 +2313,7 @@ const ESTADO_ITEM = {
   nao_cumprido: ["não cumprido", "bg-cartao/20 text-cartao"],
 };
 
-function Diretoria({ id }) {
+function Diretoria({ id, encerrada }) {
   const { dados, erro } = useDados(() => api.diretoria(id), [id]);
   const [atual, setAtual] = useState(null);
   const [falha, setFalha] = useState(null);
@@ -2290,9 +2333,9 @@ function Diretoria({ id }) {
       )}
       {falha && <Erro mensagem={falha} />}
       {d.ultimato && <Ultimato u={d.ultimato} regras={d.regras} />}
-      {d.revisao && d.revisao.tipo !== "nada" && <Revisao id={id} r={d.revisao} agir={agir} regras={d.regras} />}
+      {d.revisao && !encerrada && d.revisao.tipo !== "nada" && <Revisao id={id} r={d.revisao} agir={agir} regras={d.regras} />}
       {!d.acordo && <p className="text-muted">A diretoria se reúne depois da próxima sincronização.</p>}
-      {d.acordo?.estado === "proposto" ? <SalaDaDiretoria id={id} d={d} agir={agir} regras={d.regras} /> : <Acordo d={d} />}
+      {d.acordo?.estado === "proposto" && !encerrada ? <SalaDaDiretoria id={id} d={d} agir={agir} regras={d.regras} /> : <Acordo d={d} />}
       <Historico itens={d.historico} />
     </div>
   );
@@ -2538,6 +2581,63 @@ function Historico({ itens }) {
         ))}
       </ol>
     </section>
+  );
+}
+
+// A carreira do técnico: o total no topo e uma linha por clube, da primeira passagem à atual. Cada clube abre a
+// passagem dele (a história dele fica como estava quando o técnico saiu).
+function CarreiraDoTecnico({ id, onTrocar }) {
+  const { dados: r, erro } = useDados(() => api.passagens(id), [id]);
+  if (erro) return <Erro mensagem={erro} />;
+  if (!r) return null;
+  const t = r.total;
+  const numeros = [["Clubes", t.clubes], ["Jogos", t.jogos], ["Vitórias", t.vitorias], ["Empates", t.empates],
+    ["Derrotas", t.derrotas], ["Aproveitamento", t.aproveitamento == null ? "–" : `${t.aproveitamento}%`], ["Títulos", t.titulos]];
+  return (
+    <div className="space-y-10">
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md bg-pitch-700 sm:grid-cols-4 lg:grid-cols-7">
+        {numeros.map(([rotulo, valor]) => (
+          <div key={rotulo} className="bg-pitch-900 px-4 py-3 last:col-span-2 lg:last:col-span-1">
+            <dt className="text-xs uppercase text-muted">{rotulo}</dt>
+            <dd className="font-kit text-3xl font-bold">{valor}</dd>
+          </div>
+        ))}
+      </dl>
+      {r.passagens.length === 1 && <p className="text-muted">Ainda sem outros clubes nesta Master League.</p>}
+      <ol className="space-y-3">
+        {r.passagens.map((p) => (
+          <li key={p.id}>
+            <button
+              onClick={() => p.id !== id && onTrocar(p.id)}
+              aria-current={p.id === id ? "page" : undefined}
+              className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-pitch-800 bg-pitch-900 px-4 py-3 text-left hover:border-destaque aria-[current=page]:border-gold/60"
+            >
+              <Escudo id={p.escudo} nome={p.clube_nome} className="size-10" />
+              <span className="min-w-0 flex-1 basis-48">
+                <span className="block font-kit text-2xl font-extrabold uppercase leading-none">{p.clube_nome}</span>
+                <span className="text-sm text-muted">
+                  {dataBR(p.inicio)} – {p.atual ? "hoje" : dataBR(p.fim)}
+                  {p.motivo_saida && ` · saiu: ${p.motivo_saida}`}
+                </span>
+              </span>
+              <span className="font-kit text-lg">
+                {p.jogos} J · {p.vitorias} V · {p.empates} E · {p.derrotas} D
+                {p.aproveitamento != null && <span className="ml-2 text-gold">{p.aproveitamento}%</span>}
+              </span>
+              {p.titulos.length > 0 && (
+                <span className="flex flex-wrap gap-1">
+                  {p.titulos.map((x) => (
+                    <span key={x.nome + x.temporada} className="rounded-sm bg-gold/20 px-1.5 font-kit text-xs font-semibold uppercase text-gold">
+                      {x.nome} {x.temporada}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

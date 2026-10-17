@@ -6,6 +6,7 @@ async function pedir(caminho, opcoes) {
 }
 
 export const api = {
+  passagens: (id) => pedir(`/carreiras/${id}/passagens`),
   diretoria: (id) => pedir(`/carreiras/${id}/diretoria`),
   falarComPresidente: (id, texto) =>
     pedir(`/carreiras/${id}/diretoria/reuniao`, {

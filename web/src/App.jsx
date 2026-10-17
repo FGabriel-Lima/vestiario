@@ -9,7 +9,7 @@ export default function App() {
       {carreiraId === null ? (
         <Inicio onAbrir={setCarreiraId} />
       ) : (
-        <Carreira id={carreiraId} onVoltar={() => setCarreiraId(null)} />
+        <Carreira key={carreiraId} id={carreiraId} onVoltar={() => setCarreiraId(null)} onTrocar={setCarreiraId} />
       )}
     </main>
   );

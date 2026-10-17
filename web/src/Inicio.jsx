@@ -84,6 +84,16 @@ export default function Inicio({ onAbrir }) {
                 <span className="mt-1 block">No jogo: {dataBR(c.data_jogo)}</span>
                 <span className="mt-4 block text-xs text-muted">Sincronizado em {dataHoraBR(c.em)}</span>
               </button>
+              {c.outras_passagens.length > 0 && (
+                <p className="mt-2 flex flex-wrap items-baseline gap-x-2 px-1 text-sm text-muted">
+                  Também treinou:
+                  {c.outras_passagens.map((p) => (
+                    <button key={p.id} onClick={() => onAbrir(p.id)} className="text-chalk underline-offset-2 hover:text-destaque hover:underline">
+                      {p.clube_nome} ({p.inicio.slice(0, 4)}–{p.fim.slice(0, 4)})
+                    </button>
+                  ))}
+                </p>
+              )}
             </li>
           ))}
         </ul>
