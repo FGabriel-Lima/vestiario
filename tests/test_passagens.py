@@ -52,6 +52,18 @@ def test_volta_ao_clube_antigo_retoma_a_passagem(con):
     assert banco.carreira(con, 1)["encerrada"] is None and banco.carreira(con, 2)["encerrada"]["motivo"] == "trocou de clube"
 
 
+def test_outro_clube_numa_data_anterior_e_uma_master_league_nova(con):
+    no_clube(con, "2026-03-01", 0)
+    no_clube(con, "2027-01-10", 1)
+    no_clube(con, "2026-01-05", 2)  # o slot foi regravado com uma ML nova, de nome padrão igual
+    assert [tuple(r) for r in con.execute("SELECT id, slot, clube_idx FROM carreira ORDER BY id")] == [
+        (1, "ML00000000 até 10/01/2027", 0), (2, "ML00000000 até 10/01/2027", 1), (3, "ML00000000", 2)]
+    assert [p["id"] for p in banco._passagens_curtas(con, 3)] == [3]
+    assert [p["id"] for p in banco._passagens_curtas(con, 2)] == [1, 2]
+    no_clube(con, "2026-02-01", 2)  # a ML nova segue no slot
+    assert con.execute("SELECT count(*) FROM carreira").fetchone()[0] == 3
+
+
 def test_lista_de_carreiras_mostra_so_a_passagem_atual(con):
     no_clube(con, "2026-03-01", 0)
     no_clube(con, "2027-01-10", 1)

@@ -225,9 +225,17 @@ def selecoes(elencos: list[list[int]]) -> set[int]:
 def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict:
     """Grava um save numa transação. Partida disputada nunca regride; jogos futuros vêm só do save mais recente."""
     with con:
-        # ponytail: carreira = (slot, nome do save, clube); uma ML nova no mesmo slot com o mesmo nome padrão e o
-        # mesmo clube se mistura com a antiga (a trava de times abaixo quase nunca pega isso, porque o patch é o mesmo).
-        # Achar um id de carreira no header.dat se virar problema.
+        # Master League nova no mesmo slot e com o mesmo nome padrão: outro clube numa data anterior ao fim da carreira
+        # antiga (a troca de clube só vai para a frente). A antiga sai do slot, que ganha a marca "até DD/MM/AAAA".
+        # ponytail: uma ML nova com o mesmo clube da antiga ainda se mistura com ela (parece um backup); achar um id
+        # de carreira no header.dat se virar problema
+        fim = con.execute("SELECT max(s.data_jogo) FROM carreira c JOIN sincronizacao s ON s.carreira_id = c.id "
+                          "WHERE c.slot = ? AND c.nome = ?", (slot, save.nome)).fetchone()[0]
+        if fim and save.data_jogo.isoformat() < fim and con.execute(
+                "SELECT 1 FROM carreira WHERE slot = ? AND nome = ? AND clube_idx = ?",
+                (slot, save.nome, save.clube_idx)).fetchone() is None:
+            con.execute("UPDATE carreira SET slot = ? WHERE slot = ? AND nome = ?",
+                        (f"{slot} até {fim[8:]}/{fim[5:7]}/{fim[:4]}", slot, save.nome))
         cid = con.execute("INSERT INTO carreira(slot, nome, clube_idx) VALUES(?, ?, ?) ON CONFLICT DO UPDATE "
                           "SET nome = excluded.nome RETURNING id", (slot, save.nome, save.clube_idx)).fetchone()[0]
         guardados = {r[0]: r[1] for r in con.execute("SELECT idx, nome FROM time WHERE carreira_id = ?", (cid,))}
