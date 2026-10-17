@@ -17,6 +17,8 @@ Os dados vêm do save do jogo, sem cadastro manual. É só salvar no PES e clica
   - **Transferências:** quem chegou e quem saiu, de onde veio e para onde foi, com o valor, e as propostas recebidas.
   - **Adversários, Lendas e Pelo mundo:** retrospecto contra cada time, recordes, sala de troféus, artilharia do
     mundo e campeões.
+  - **Carreira do técnico:** se você trocar de clube no PES, cada clube vira uma passagem da mesma Master League.
+    A do clube anterior fica guardada como estava, e a aba soma a campanha e os títulos de todas.
 - **Tem IA (Gemini), sempre presa aos dados do save:**
   - **Feed:** posts no estilo Instagram do perfil oficial do clube, da TNT Sports, do ge e de um perfil de mercado.
     Quem publica o quê sai dos fatos do save; a IA só escreve as legendas. Os posts saem a cada sincronização e
