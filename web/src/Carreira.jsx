@@ -3103,7 +3103,10 @@ function Adversarios({ id, clube }) {
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <Escudo id={a.escudo} nome={a.nome} />
-                    <span className="truncate">{a.nome}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{a.nome}</span>
+                      {a.tecnico && <span className="block truncate text-xs text-muted"><span className="hidden sm:inline">técnico </span>{a.tecnico}</span>}
+                    </span>
                   </span>
                   {[a.jogos, a.vitorias, a.empates, a.derrotas].map((n, i) => (
                     <span key={i} className="text-right font-kit text-xl">
@@ -3302,6 +3305,7 @@ function CampeoesDoAno({ id, ano, clube }) {
                   <span aria-hidden="true" className="icone text-base text-gold">emoji_events</span>
                   <Escudo id={t.campeao.escudo} nome={t.campeao.nome} className="size-5" />
                   <span className={`truncate font-semibold ${nosso ? "text-destaque" : ""}`}>{t.campeao.nome}</span>
+                  {t.campeao.tecnico && <span className="truncate text-sm text-muted">de {t.campeao.tecnico}</span>}
                   <span className="truncate text-sm text-muted">· vice {t.vice.nome}</span>
                 </span>
               </li>

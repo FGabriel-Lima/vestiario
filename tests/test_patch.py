@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from vestiario.patch import (REG, ROSTO, UNICOLOR, WESYS, carregar_player_bin, dds_para_png, desembrulhar,
-                              ler_arquivos, ler_cores, ler_nomes, ler_posicoes)
+from vestiario.patch import (COACH, REG, ROSTO, TEAM, UNICOLOR, WESYS, carregar_player_bin, dds_para_png,
+                              desembrulhar, ler_arquivos, ler_cores, ler_nomes, ler_posicoes, ler_tecnicos)
 
 
 def player_bin(jogadores: dict[int, str]) -> bytes:
@@ -109,3 +109,18 @@ def test_posicao_no_player_bin():
     reg[54] = 0b1100_0000 | 0b0010  # bits 434..437 (byte 54, bits 2..5) = 12 (CA); o resto do byte é de outro campo
     reg[54] = (reg[54] & ~(0b1111 << 2)) | (12 << 2)
     assert ler_posicoes(bytes(reg)) == {7: 12}
+
+
+def test_ler_tecnicos_pelo_id_do_time():
+    coach = b"".join(struct.pack("<II", k, 0) + n.encode().ljust(92, b"\0") for k, n in ((7, "Abel Ferreira"), (9, "Tite")))
+    team = b"".join(struct.pack("<III", k, 0, tid).ljust(1532, b"\0") for k, tid in ((7, 137), (9, 1250), (5, 2)))
+    assert ler_tecnicos(coach, team) == {137: "Abel Ferreira", 1250: "Tite"}  # técnico 5 não existe: o time fica fora
+
+
+def test_tecnicos_instalados():
+    pes = Path(r"D:\Transferpatch")
+    if not pes.exists():
+        pytest.skip(r"Transfer Patch não instalado em D:\Transferpatch")
+    a = ler_arquivos(pes, {COACH, TEAM})
+    tecnicos = ler_tecnicos(desembrulhar(a[COACH]), desembrulhar(a[TEAM]))
+    assert (tecnicos[137], tecnicos[1247], tecnicos[1248]) == ("Abel Ferreira", "Léo Porto", "Leonardo Jardim")

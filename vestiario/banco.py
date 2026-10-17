@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS time(
   pes_id INTEGER,
   PRIMARY KEY(carreira_id, idx));
 CREATE TABLE IF NOT EXISTS cor_time(pes_id INTEGER PRIMARY KEY, cores TEXT NOT NULL);
+-- técnico de cada time no patch (Team.bin); o save não muda isso
+CREATE TABLE IF NOT EXISTS tecnico_time(pes_id INTEGER PRIMARY KEY, nome TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS jogador(player_id INTEGER PRIMARY KEY, nome TEXT NOT NULL, posicao INTEGER);
 CREATE TABLE IF NOT EXISTS partida(
   id INTEGER PRIMARY KEY, carreira_id INTEGER NOT NULL REFERENCES carreira, data TEXT NOT NULL,
@@ -194,6 +196,18 @@ def gravar_cores(con: sqlite3.Connection, cores: dict[int, list[str]]) -> None:
     with con:
         con.executemany("INSERT INTO cor_time VALUES(?, ?) ON CONFLICT DO UPDATE SET cores = excluded.cores",
                         ((tid, " ".join(c)) for tid, c in cores.items()))
+
+
+def gravar_tecnicos(con: sqlite3.Connection, tecnicos: dict[int, str]) -> None:
+    with con:
+        con.execute("DELETE FROM tecnico_time")
+        con.executemany("INSERT INTO tecnico_time VALUES(?, ?)", tecnicos.items())
+
+
+def tecnicos(con: sqlite3.Connection, cid: int) -> dict[int, str]:
+    """{idx do time: técnico no patch}, sem o clube do usuário (o técnico dele é o usuário)."""
+    return dict(con.execute("SELECT t.idx, k.nome FROM time t JOIN tecnico_time k USING(pes_id) "
+                            "WHERE t.carreira_id = ? AND t.idx <> ?", (cid, _ultima(con, cid)["clube_idx"])))
 
 
 def tem_cores(con: sqlite3.Connection) -> bool:
@@ -514,7 +528,9 @@ def confrontos(con: sqlite3.Connection, cid: int) -> list[dict]:
         if p["disputada"]:
             lado = "visitante" if p["mandante_idx"] == clube else "mandante"
             por_adversario.setdefault(p[f"{lado}_idx"], (p[lado], p[f"{lado}_escudo"], []))[2].append(p)
-    return sorted(({"idx": idx, "nome": nome, "escudo": escudo, **_campanha(ps, clube), "partidas": ps[::-1]}
+    tec = tecnicos(con, cid)
+    return sorted(({"idx": idx, "nome": nome, "escudo": escudo, "tecnico": tec.get(idx), **_campanha(ps, clube),
+                    "partidas": ps[::-1]}
                    for idx, (nome, escudo, ps) in por_adversario.items()), key=lambda a: (-a["jogos"], a["nome"]))
 
 
@@ -1381,11 +1397,12 @@ def _campeao(fases: list[dict], chave: list[dict], todas: list[dict]) -> dict:
 def titulos(con: sqlite3.Connection, cid: int) -> list[dict]:
     """Edições já decididas no save, da mais recente para a mais antiga, com campeão e vice."""
     clube = _ultima(con, cid)["clube_idx"]
+    tec = tecnicos(con, cid)
     lista = []
     for chave, e in _edicoes(con, cid).items():
         m = _montar(e, clube)
         if m["campeao"]:
             fim = max(p["data"] for t in e["partes"] for p in t)
             lista.append({"chave": chave, "nome": m["nome"], "temporada": m["temporada"], "fim": fim,
-                          "campeao": m["campeao"], "vice": m["vice"]})
+                          **{k: {**m[k], "tecnico": tec.get(m[k]["idx"])} for k in ("campeao", "vice")}})
     return sorted(lista, key=lambda t: (t["fim"], t["nome"]), reverse=True)

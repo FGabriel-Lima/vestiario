@@ -27,8 +27,10 @@ def arroba_do_clube(nome: str) -> str:
     return re.sub(r"[^a-z0-9]", "", sem_acento.casefold())
 
 
-def _time(p: dict, lado: str) -> dict:
-    return {"idx": p[f"{lado}_idx"], "nome": p[lado], "escudo": p[f"{lado}_escudo"], "gols": p[f"gols_{lado}"]}
+def _time(p: dict, lado: str, tecnicos: dict[int, str]) -> dict:
+    """O time do jogo; o adversário vem com o técnico do patch (o do clube do usuário é ele, e fica de fora)."""
+    t = {"idx": p[f"{lado}_idx"], "nome": p[lado], "escudo": p[f"{lado}_escudo"], "gols": p[f"gols_{lado}"]}
+    return {**t, "tecnico": tecnicos[t["idx"]]} if t["idx"] in tecnicos else t
 
 
 def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
@@ -38,6 +40,7 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
     de = con.execute("SELECT max(data_jogo) FROM sincronizacao WHERE carreira_id = ? AND data_jogo < ?",
                      (cid, ate)).fetchone()[0]
     todas = banco.partidas(con, cid)
+    tec = banco.tecnicos(con, cid)
     posts = []
     post = lambda perfil, tipo, data, dados: posts.append({"perfil": perfil, "tipo": tipo, "data": data, "dados": dados})
 
@@ -59,8 +62,8 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
                and (p["data"], p["mandante_idx"], p["visitante_idx"]) not in ja_postados]
     for p in jogados[-5:] if de is None else jogados:
         pro, contra = banco._placar(p, clube)
-        dados = {"competicao": p["competicao"], "data": p["data"], "mandante": _time(p, "mandante"),
-                 "visitante": _time(p, "visitante"), "nosso_lado": "mandante" if p["mandante_idx"] == clube else "visitante",
+        dados = {"competicao": p["competicao"], "data": p["data"], "mandante": _time(p, "mandante", tec),
+                 "visitante": _time(p, "visitante", tec), "nosso_lado": "mandante" if p["mandante_idx"] == clube else "visitante",
                  "resultado": "vitória" if pro > contra else "derrota" if pro < contra else "empate",
                  "gols_do_clube": _gols_do_clube(con, p["id"], 0 if p["mandante_idx"] == clube else 1)}
         if melhor := con.execute("SELECT e.player_id, coalesce(j.nome, 'Jogador #' || e.player_id), e.nota FROM escalacao e "
@@ -150,7 +153,7 @@ def posts_do_periodo(con: sqlite3.Connection, cid: int) -> list[dict]:
 
     if proximo := next((p for p in todas if not p["disputada"] and p["data"] > ate), None):
         post("clube", "proximo_jogo", ate, {"competicao": proximo["competicao"], "data": proximo["data"],
-                                            "mandante": _time(proximo, "mandante"), "visitante": _time(proximo, "visitante")})
+                                            "mandante": _time(proximo, "mandante", tec), "visitante": _time(proximo, "visitante", tec)})
     return sorted(posts, key=lambda p: p["data"])
 
 
@@ -178,7 +181,8 @@ Cada post já tem o perfil que publica, o tipo e os fatos. Escreva uma legenda p
 Regras, sem exceção:
 - Use SOMENTE os fatos de cada post. Não cite pessoas, clubes, números, lesões, declarações, bastidores, intenções
   ou histórico que não estejam nele. Não invente frases entre aspas nem o que alguém pensa, quer ou decide.
-- Não diga o nome do treinador nem de ninguém da comissão ou da diretoria.
+- Não diga o nome do treinador do clube nem de ninguém da comissão ou da diretoria. O técnico de outro time só pode
+  ser citado pelo campo "tecnico" daquele time nos fatos.
 - Este mundo é o do jogo: não relacione com o futebol da vida real.
 - 1 a 3 frases por legenda, em português do Brasil. Valores em reais como se fala no futebol ("R$ 3,6 milhões").
 - Devolva o mesmo "id" de cada post."""
@@ -245,7 +249,8 @@ def atualizar(con: sqlite3.Connection, cid: int) -> dict:
 SISTEMA_COLETIVA = """Você é repórter do ge numa entrevista coletiva com o treinador de um clube, logo depois de um \
 jogo numa carreira de Master League do PES. Faça 3 perguntas curtas e diretas sobre o jogo, como um repórter de
 verdade: o resultado, quem decidiu ou foi bem (ou mal) e o que vem pela frente. Use SOMENTE os fatos do JSON: não
-invente lances, lesões, polêmicas, declarações nem histórico. Não diga o nome do treinador. Português do Brasil."""
+invente lances, lesões, polêmicas, declarações nem histórico. Não diga o nome do treinador; o técnico do adversário
+só pelo campo "tecnico" do time dele nos fatos. Português do Brasil."""
 
 ESQUEMA_COLETIVA = {"type": "OBJECT", "properties": {"perguntas": {"type": "ARRAY", "items": {"type": "STRING"}}},
                     "required": ["perguntas"]}
@@ -253,7 +258,8 @@ ESQUEMA_COLETIVA = {"type": "OBJECT", "properties": {"perguntas": {"type": "ARRA
 SISTEMA_MATERIA = """Você escreve a legenda de um post do ge no Instagram sobre a entrevista coletiva do treinador de \
 um clube depois de um jogo numa carreira de Master League do PES. Tom jornalístico, de 1 a 3 frases. Cite entre aspas
 um ou dois trechos das respostas, copiados palavra por palavra. Use só os fatos do JSON. Não diga o nome do treinador:
-chame-o de "o técnico do" clube. Português do Brasil."""
+chame-o de "o técnico do" clube. O técnico do adversário só pelo campo "tecnico" do time dele nos fatos. Português
+do Brasil."""
 
 ESQUEMA_MATERIA = {"type": "OBJECT", "properties": {"legenda": {"type": "STRING"}}, "required": ["legenda"]}
 

@@ -12,13 +12,16 @@ def _faltam(pasta: Path, ids: set[int]) -> set[int]:
 
 
 def extrair_do_patch(con: sqlite3.Connection, pasta_pes: Path, pasta_escudos: Path, pasta_rostos: Path) -> int:
-    """Grava as cores dos uniformes de todos os times e copia do patch os escudos (pasta_escudos/<id>.png)
+    """Grava as cores dos uniformes e os técnicos de todos os times e copia do patch os escudos (pasta_escudos/<id>.png)
     e as minifaces dos jogadores do clube (pasta_rostos/<player_id>.png) que ainda faltam. Devolve quantas copiou."""
     escudos = {f"common/render/symbol/flag/e_{i:06d}_r.png": i for i in _faltam(pasta_escudos, banco.escudos(con))}
     rostos = {patch.ROSTO.format(i): i for i in _faltam(pasta_rostos, banco.rostos(con))}
-    achados = patch.ler_arquivos(pasta_pes, {*escudos, *rostos, patch.UNICOLOR})
+    achados = patch.ler_arquivos(pasta_pes, {*escudos, *rostos, patch.UNICOLOR, patch.COACH, patch.TEAM})
     if (uni := achados.pop(patch.UNICOLOR, None)) is not None:
         banco.gravar_cores(con, patch.ler_cores(patch.desembrulhar(uni)))
+    coach, team = achados.pop(patch.COACH, None), achados.pop(patch.TEAM, None)
+    if coach is not None and team is not None:
+        banco.gravar_tecnicos(con, patch.ler_tecnicos(patch.desembrulhar(coach), patch.desembrulhar(team)))
     for alvo, blob in achados.items():
         if alvo in escudos:
             (pasta_escudos / f"{escudos[alvo]}.png").write_bytes(blob)

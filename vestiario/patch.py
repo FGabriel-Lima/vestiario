@@ -12,6 +12,8 @@ from . import cpk
 ALVO = "common/etc/pesdb/Player.bin"
 ROSTO = "common/render/symbol/player/{}.dds"
 UNICOLOR = "common/character0/model/character/uniform/team/UniColor.bin"
+COACH = "common/etc/pesdb/Coach.bin"
+TEAM = "common/etc/pesdb/Team.bin"
 WESYS = bytes.fromhex("ff10815745535953")
 REG, OFF_ID, OFF_NOME = 312, 8, 68
 # Posição registrada: 4 bits a partir do bit 434 do registro (conferido com 17 jogadores na tela do PES).
@@ -57,6 +59,20 @@ def ler_cores(raw: bytes) -> dict[int, list[str]]:
                         rgbs.append(rgb)
         cores[tid] = ["#" + rgb.hex() for rgb in rgbs[:3]]
     return cores
+
+
+def ler_tecnicos(coach: bytes, team: bytes) -> dict[int, str]:
+    """{id do time: nome do técnico}, com o Coach.bin e o Team.bin já descompactados. Coach.bin: registro de 100
+    bytes, u32 id do técnico e o nome em +8 (46 bytes). Team.bin: registro de 1532 bytes, u32 id do técnico em +0 e
+    u32 id do time em +8. O técnico só tem nome: nenhum atributo."""
+    nomes = {struct.unpack_from("<I", coach, o)[0]: coach[o + 8:o + 54].split(b"\0")[0].decode("utf-8", "replace")
+             for o in range(0, len(coach) - 99, 100)}
+    times = {}
+    for o in range(0, len(team) - 1531, 1532):
+        k, tid = struct.unpack_from("<I", team, o)[0], struct.unpack_from("<I", team, o + 8)[0]
+        if k in nomes:
+            times[tid] = nomes[k]
+    return times
 
 
 def dds_para_png(blob: bytes) -> bytes:

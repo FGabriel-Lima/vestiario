@@ -137,3 +137,15 @@ def test_novo_tecnico_na_primeira_edicao_da_passagem():
     assert not [p for p in feed.posts_do_periodo(c, 2) if p["tipo"] == "novo_tecnico"]  # só na primeira edição
     assert feed.legenda_padrao(posts[[p["tipo"] for p in posts].index("novo_tecnico")]) == (
         "Novo técnico no comando, vindo do Clube A.")
+
+
+def test_tecnico_do_adversario_vem_do_patch_e_o_do_clube_fica_de_fora():
+    c = banco.conectar(":memory:")
+    save = fazer_save("2026-01-25", [partida("2026-01-22", 0, 1, (2, 0), [atuacao(10, 0)])])
+    save.ids = [100, 101, 102]
+    banco.gravar(c, "ML00000000", save, AGORA)
+    banco.gravar_tecnicos(c, {100: "Léo Porto", 101: "Abel Ferreira"})
+    assert banco.tecnicos(c, 1) == {1: "Abel Ferreira"}  # o Clube A é o do usuário
+    assert [a["tecnico"] for a in banco.confrontos(c, 1)] == ["Abel Ferreira"]
+    jogo = next(p["dados"] for p in feed.posts_do_periodo(c, 1) if p["tipo"] == "fim_de_jogo")
+    assert "tecnico" not in jogo["mandante"] and jogo["visitante"]["tecnico"] == "Abel Ferreira"
