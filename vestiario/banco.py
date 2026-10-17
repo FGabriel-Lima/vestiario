@@ -9,8 +9,11 @@ from pathlib import Path
 from .leitor import MOEDA, Save
 
 ESQUEMA = """
+-- uma carreira é uma passagem do técnico por um clube numa Master League (slot e nome do save); as passagens da
+-- mesma Master League têm o mesmo slot e nome
 CREATE TABLE IF NOT EXISTS carreira(
-  id INTEGER PRIMARY KEY, slot TEXT NOT NULL, nome TEXT NOT NULL, UNIQUE(slot, nome));
+  id INTEGER PRIMARY KEY, slot TEXT NOT NULL, nome TEXT NOT NULL, clube_idx INTEGER NOT NULL,
+  UNIQUE(slot, nome, clube_idx));
 CREATE TABLE IF NOT EXISTS sincronizacao(
   id INTEGER PRIMARY KEY, carreira_id INTEGER NOT NULL REFERENCES carreira,
   em TEXT NOT NULL, data_jogo TEXT NOT NULL, clube_idx INTEGER NOT NULL, clube_nome TEXT NOT NULL,
@@ -114,6 +117,19 @@ def conectar(caminho: Path | str) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     tabelas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     con.executescript(ESQUEMA)
+    if "clube_idx" not in {r[1] for r in con.execute("PRAGMA table_info(carreira)")}:
+        # banco anterior às passagens: a carreira passa a ser (slot, nome, clube). O SQLite não troca um UNIQUE,
+        # então a tabela é refeita com os mesmos ids (as outras tabelas continuam apontando para eles)
+        con.execute("PRAGMA foreign_keys = OFF")
+        with con:
+            con.execute("CREATE TABLE carreira_nova(id INTEGER PRIMARY KEY, slot TEXT NOT NULL, nome TEXT NOT NULL, "
+                        "clube_idx INTEGER NOT NULL, UNIQUE(slot, nome, clube_idx))")
+            con.execute("INSERT INTO carreira_nova SELECT c.id, c.slot, c.nome, coalesce((SELECT s.clube_idx FROM "
+                        "sincronizacao s WHERE s.carreira_id = c.id ORDER BY s.data_jogo DESC, s.id DESC LIMIT 1), -1) "
+                        "FROM carreira c")
+            con.execute("DROP TABLE carreira")
+            con.execute("ALTER TABLE carreira_nova RENAME TO carreira")
+        con.execute("PRAGMA foreign_keys = ON")
     if tabelas and not {"vinculo", "negocio", "contrato", "proposta"} <= tabelas:
         with con:  # banco anterior a origem e destino, valores ou contratos: relê os saves que ainda existem
             con.execute("DELETE FROM arquivo")
@@ -208,9 +224,11 @@ def selecoes(elencos: list[list[int]]) -> set[int]:
 def gravar(con: sqlite3.Connection, slot: str, save: Save, em: datetime) -> dict:
     """Grava um save numa transação. Partida disputada nunca regride; jogos futuros vêm só do save mais recente."""
     with con:
-        # ponytail: carreira = (slot, nome do save); uma ML nova no mesmo slot com o mesmo nome padrão se mistura com a antiga (a trava de times logo abaixo quase nunca pega isso, porque o patch é o mesmo). Achar um id de carreira no header.dat se virar problema.
-        cid = con.execute("INSERT INTO carreira(slot, nome) VALUES(?, ?) ON CONFLICT DO UPDATE "
-                          "SET nome = excluded.nome RETURNING id", (slot, save.nome)).fetchone()[0]
+        # ponytail: carreira = (slot, nome do save, clube); uma ML nova no mesmo slot com o mesmo nome padrão e o
+        # mesmo clube se mistura com a antiga (a trava de times abaixo quase nunca pega isso, porque o patch é o mesmo).
+        # Achar um id de carreira no header.dat se virar problema.
+        cid = con.execute("INSERT INTO carreira(slot, nome, clube_idx) VALUES(?, ?, ?) ON CONFLICT DO UPDATE "
+                          "SET nome = excluded.nome RETURNING id", (slot, save.nome, save.clube_idx)).fetchone()[0]
         guardados = {r[0]: r[1] for r in con.execute("SELECT idx, nome FROM time WHERE carreira_id = ?", (cid,))}
         diferente = next((i for i, n in enumerate(save.times) if guardados.get(i, n) != n), None)
         if diferente is not None:
@@ -299,12 +317,47 @@ def _ultima(con: sqlite3.Connection, cid: int) -> sqlite3.Row | None:
                        (cid,)).fetchone()
 
 
+def _passagens_curtas(con: sqlite3.Connection, cid: int) -> list[dict]:
+    """As passagens (carreiras com o mesmo slot e nome) da Master League de cid, da primeira à mais recente. A atual é
+    a de sincronização mais recente; as outras estão encerradas, com o motivo da saída."""
+    linhas = con.execute(
+        "SELECT c.id, c.clube_idx, min(s.data_jogo) AS inicio, max(s.data_jogo) AS fim, max(s.id) AS ultima "
+        "FROM carreira c JOIN carreira x ON x.slot = c.slot AND x.nome = c.nome "
+        "JOIN sincronizacao s ON s.carreira_id = c.id WHERE x.id = ? GROUP BY c.id ORDER BY inicio, c.id",
+        (cid,)).fetchall()
+    if not linhas:
+        return []
+    atual = max(linhas, key=lambda r: (r["fim"], r["ultima"]))["id"]
+    lista = []
+    for r in linhas:
+        nome, escudo = con.execute(
+            "SELECT s.clube_nome, t.pes_id FROM sincronizacao s LEFT JOIN time t ON t.carreira_id = s.carreira_id "
+            "AND t.idx = s.clube_idx WHERE s.id = ?", (r["ultima"],)).fetchone()
+        demitido = con.execute("SELECT 1 FROM confianca WHERE carreira_id = ? AND clube_idx = ? AND chave LIKE "
+                               "'demissao:%'", (r["id"], r["clube_idx"])).fetchone()
+        lista.append({"id": r["id"], "clube_idx": r["clube_idx"], "clube_nome": nome, "escudo": escudo,
+                      "inicio": r["inicio"], "fim": r["fim"], "atual": r["id"] == atual,
+                      "motivo_saida": None if r["id"] == atual else "demitido" if demitido else "trocou de clube"})
+    return lista
+
+
 def carreiras(con: sqlite3.Connection) -> list[dict]:
-    return [dict(r) for r in con.execute(
+    """Uma linha por Master League: a passagem atual, com as outras passagens."""
+    lista = [dict(r) for r in con.execute(
         "SELECT c.id, c.slot, c.nome, s.clube_nome, s.data_jogo, s.em, t.pes_id AS escudo FROM carreira c "
         "JOIN sincronizacao s ON s.id = (SELECT id FROM sincronizacao WHERE carreira_id = c.id "
         "ORDER BY data_jogo DESC, id DESC LIMIT 1) "
         "LEFT JOIN time t ON t.carreira_id = c.id AND t.idx = s.clube_idx ORDER BY s.em DESC, c.id")]
+    por_id, vistas, saida = {c["id"]: c for c in lista}, set(), []
+    for c in lista:
+        if c["id"] in vistas:
+            continue
+        ps = _passagens_curtas(con, c["id"])
+        vistas |= {p["id"] for p in ps}
+        atual = next(p["id"] for p in ps if p["atual"])
+        saida.append({**por_id[atual], "outras_passagens": [
+            {k: p[k] for k in ("id", "clube_nome", "inicio", "fim")} for p in ps if not p["atual"]]})
+    return saida
 
 
 def carreira(con: sqlite3.Connection, cid: int) -> dict | None:
@@ -313,9 +366,13 @@ def carreira(con: sqlite3.Connection, cid: int) -> dict | None:
         return None
     t = con.execute("SELECT t.pes_id, c.cores FROM time t LEFT JOIN cor_time c USING(pes_id) "
                     "WHERE t.carreira_id = ? AND t.idx = ?", (cid, s["clube_idx"])).fetchone()
+    ps = _passagens_curtas(con, cid)
     return {"id": cid, "clube_nome": s["clube_nome"], "clube_idx": s["clube_idx"], "data_jogo": s["data_jogo"],
             "escudo": t["pes_id"] if t else None, "cores": t["cores"].split() if t and t["cores"] else [],
-            "orcamento": s["orcamento"] * MOEDA if s["orcamento"] is not None else None, **financas(con, s)}
+            "orcamento": s["orcamento"] * MOEDA if s["orcamento"] is not None else None, **financas(con, s),
+            "passagens": [{"id": p["id"], "clube_nome": p["clube_nome"], "atual": p["atual"]} for p in ps],
+            "encerrada": next(({"data": p["fim"], "motivo": p["motivo_saida"]} for p in ps
+                               if p["id"] == cid and not p["atual"]), None)}
 
 
 def financas(con: sqlite3.Connection, s: sqlite3.Row) -> dict:
